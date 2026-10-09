@@ -1,0 +1,18 @@
+# runtime data
+logs/*
+!logs/.gitkeep
+
+# built macOS helper
+bin/
+
+# python
+__pycache__/
+*.pyc
+
+# editor / OS
+.DS_Store
+
+# virtualenvs / tooling
+.venv/
+venv/
+.claude/

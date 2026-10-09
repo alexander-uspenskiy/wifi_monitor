@@ -1,0 +1,1071 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wi-Fi Monitor</title>
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%232f6fed'/%3E%3Cpath%20d='M6.1%2012.1A14%2014%200%200%201%2025.9%2012.1M9.64%2015.64A9%209%200%200%201%2022.36%2015.64M12.82%2018.82A4.5%204.5%200%200%201%2019.18%2018.82'%20fill='none'%20stroke='%23fff'%20stroke-width='2.4'%20stroke-linecap='round'/%3E%3Ccircle%20cx='16'%20cy='23.5'%20r='1.9'%20fill='%23fff'/%3E%3C/svg%3E">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #ffffff; --text: #1c2330; --muted: #6a7385; --line: #e3e6ec;
+    --good: #1a9b5b; --warn: #d98a0b; --bad: #d63c3c;
+    --c1: #2f6fed; --c2: #8a5cf5; --c3: #e8590c; --grid: rgba(120,130,150,.18);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0f131a; --card: #171c26; --text: #e6e9f0; --muted: #8b95a9; --line: #262d3b;
+      --good: #35c07a; --warn: #f0a928; --bad: #f06060;
+      --c1: #6a9bff; --c2: #b093ff; --c3: #ff8a4c; --grid: rgba(140,150,170,.16);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0f131a; --card: #171c26; --text: #e6e9f0; --muted: #8b95a9; --line: #262d3b;
+    --good: #35c07a; --warn: #f0a928; --bad: #f06060;
+    --c1: #6a9bff; --c2: #b093ff; --c3: #ff8a4c; --grid: rgba(140,150,170,.16);
+  }
+  :root { color-scheme: light dark; }
+  :root[data-theme="light"] { color-scheme: light; }
+  :root[data-theme="dark"] { color-scheme: dark; }
+  .chips.mk { margin: 0 0 6px; }
+  .chips.mk button { display: inline-flex; align-items: center; gap: 6px; }
+  .chips.mk button .sw { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .chips.mk button.off { opacity: .45; text-decoration: line-through; }
+  .card { position: relative; }
+  .card h2 { padding-right: 40px; }
+  .rangehint { margin-top: 8px; padding: 6px 10px; border-radius: 8px; background: var(--bg); color: var(--muted); font-size: 12.5px; }
+  .rangehint b { color: var(--c1); }
+  .expbtn { position: absolute; top: 8px; right: 10px; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 8px; cursor: pointer; }
+  .expbtn:hover, .expbtn:focus-visible, .expbtn[aria-expanded="true"] { border-color: var(--c1); color: var(--c1); outline: none; }
+  #expmenu { position: fixed; z-index: 1001; display: none; min-width: 210px; padding: 6px; border: 1px solid var(--line); border-radius: 10px; background: var(--card); box-shadow: 0 6px 24px rgba(0,0,0,.22); font-size: 13px; }
+  #expmenu .range { padding: 4px 8px 6px; color: var(--muted); font-size: 12px; border-bottom: 1px solid var(--line); margin-bottom: 4px; }
+  #expmenu button { display: flex; width: 100%; justify-content: space-between; gap: 14px; border: 0; background: transparent; color: var(--text); padding: 6px 8px; border-radius: 6px; font: inherit; cursor: pointer; text-align: left; }
+  #expmenu button:hover { background: var(--bg); }
+  #expmenu button span { color: var(--muted); font-size: 12px; }
+  #cLat, #cSig, #cSnr { touch-action: pan-y; cursor: crosshair; }
+  .nodata { margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: var(--bg); color: var(--muted); font-size: 12.5px; }
+  .nodata[hidden] { display: none; }
+  .rangeline { margin: -2px 0 6px; color: var(--muted); font-size: 12px; }
+  #selpanel { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--c1); border-radius: 10px; background: var(--bg); }
+  #selpanel[hidden] { display: none; }
+  #selpanel .selhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
+  #selpanel .selhead b { flex: 1 1 200px; }
+  #selpanel .selhead button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 6px; padding: 4px 10px; font: inherit; cursor: pointer; }
+  #selpanel .selhead button.go { background: var(--c1); border-color: var(--c1); color: #fff; }
+  #selpanel .selgrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  #selpanel .selgrid .tile .v { font-size: 18px; }
+  #selpanel ul.selev { list-style: none; margin: 0 0 8px; padding: 0; }
+  #selpanel ul.selev li { padding: 3px 0; display: flex; gap: 8px; }
+  #selpanel .hintline { color: var(--muted); font-size: 12px; }
+  #spikes { margin-top: 12px; }
+  #spikes .sum { margin-bottom: 6px; }
+  #spikes .cap { color: var(--muted); font-size: 12px; margin-top: 6px; }
+  table.spikes td.l, table.spikes th.l { white-space: normal; max-width: none; }
+  details.fix { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 12.5px; font-weight: 400; text-align: left; }
+  details.fix summary { cursor: pointer; color: var(--c1); font-weight: 600; list-style: none; user-select: none; }
+  details.fix summary::-webkit-details-marker { display: none; }
+  details.fix summary::before { content: '▸ '; }
+  details.fix[open] summary::before { content: '▾ '; }
+  .fixbody { margin-top: 8px; display: grid; gap: 10px; color: var(--text); line-height: 1.45; }
+  .fixbody h4 { margin: 0 0 3px; font-size: 12px; }
+  .fixbody h4.you { color: var(--good); } .fixbody h4.router { color: var(--c1); } .fixbody h4.isp { color: var(--warn); }
+  .fixbody ul { margin: 0; padding-left: 18px; } .fixbody li { margin: 2px 0; } .fixbody p { margin: 0; }
+  .tile:has(details[open]) { grid-column: 1 / -1; }
+  .ctl { display: inline-flex; align-items: center; white-space: nowrap; }
+  .ctl select.day { min-width: 0; max-width: min(300px, calc(100vw - 90px)); text-overflow: ellipsis; }
+  .hint { display: inline-flex; align-items: center; justify-content: center; width: 15px; height: 15px; margin-left: 6px; border: 1px solid var(--muted); border-radius: 50%; color: var(--muted); font: italic 700 10px/1 Georgia, serif; cursor: help; vertical-align: middle; user-select: none; text-transform: none; letter-spacing: 0; }
+  .hint:hover, .hint:focus-visible { color: var(--c1); border-color: var(--c1); outline: none; }
+  #tip { position: fixed; z-index: 1000; display: none; max-width: 300px; padding: 8px 10px; border-radius: 8px; background: var(--text); color: var(--bg); font: 400 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; box-shadow: 0 4px 16px rgba(0,0,0,.25); pointer-events: none; text-transform: none; letter-spacing: 0; text-align: left; white-space: normal; }
+  .themebtn { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 3px 12px; font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
+  .themebtn:hover { border-color: var(--c1); }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 32px; }
+  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .brand { display: inline-flex; align-items: center; gap: 10px; }
+  .logo { flex: none; display: block; }
+  h1 { font-size: 20px; margin: 0; font-weight: 650; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; background: var(--card); border: 1px solid var(--line); }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .spacer { flex: 1; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); }
+  .seg button { border: 0; background: transparent; color: var(--muted); padding: 5px 12px; font: inherit; cursor: pointer; }
+  .seg button.on { background: var(--c1); color: #fff; }
+  label.switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; padding: 3px 10px; border-radius: 999px; background: var(--card); border: 1px solid var(--line); font-weight: 600; font-size: 13px; }
+  label.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+  label.switch .track { width: 30px; height: 17px; border-radius: 9px; background: var(--muted); position: relative; transition: background .15s; }
+  label.switch .track::after { content: ''; position: absolute; top: 2px; left: 2px; width: 13px; height: 13px; border-radius: 50%; background: #fff; transition: left .15s; }
+  label.switch input:checked + .track { background: var(--good); }
+  label.switch input:checked + .track::after { left: 15px; }
+  label.switch input:focus-visible + .track { outline: 2px solid var(--c1); outline-offset: 2px; }
+  select.day { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 8px; padding: 5px 8px; font: inherit; max-width: 100%; }
+  .seg.dim button.on { background: transparent; color: var(--muted); }
+  .tablewrap { overflow-x: auto; }
+  table.days { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  table.days th { text-align: right; font-weight: 600; font-size: 12px; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.days td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  table.days th:first-child, table.days td:first-child, table.days th.l, table.days td.l { text-align: left; }
+  table.days td.l { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+  table.days tbody tr { cursor: pointer; }
+  table.days tbody tr:hover { background: var(--bg); }
+  table.days tbody tr.sel { background: var(--bg); box-shadow: inset 3px 0 0 var(--c1); }
+  td.bad { color: var(--bad); font-weight: 600; } td.warn { color: var(--warn); font-weight: 600; } td.good { color: var(--good); }
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+  .tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
+  .tile .k { color: var(--muted); font-size: 12px; }
+  .tile .v { font-size: 22px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile .s { color: var(--muted); font-size: 12px; margin-top: 1px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
+  .card.full { grid-column: 1 / -1; }
+  .card h2 { font-size: 13px; font-weight: 600; margin: 0 0 8px; color: var(--muted); }
+  .chart { position: relative; height: 230px; }
+  .chart.tall { height: 270px; }
+  .addev { display: flex; gap: 6px; margin-bottom: 8px; }
+  .addev input { flex: 1; min-width: 0; padding: 6px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; }
+  .addev button, .chips button { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 6px; padding: 5px 10px; font: inherit; cursor: pointer; }
+  .addev button.go { background: var(--c1); border-color: var(--c1); color: #fff; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 8px; }
+  .chips button { font-size: 12px; padding: 2px 8px; color: var(--muted); }
+  #evmsg { font-size: 12px; color: var(--muted); min-height: 16px; margin-bottom: 4px; }
+  ul.events { list-style: none; margin: 0; padding: 0; max-height: 230px; overflow: auto; }
+  ul.events li { padding: 6px 0; border-bottom: 1px solid var(--line); display: flex; gap: 8px; }
+  ul.events li:last-child { border-bottom: 0; }
+  ul.events .when { color: var(--muted); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .tag { font-size: 11px; font-weight: 700; padding: 1px 6px; border-radius: 4px; color: #fff; align-self: flex-start; }
+  .tag.bad { background: var(--bad); } .tag.warn { background: var(--warn); } .tag.info { background: var(--c1); }
+  footer { color: var(--muted); font-size: 12px; margin-top: 14px; }
+  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="brand"><svg class="logo" viewBox="0 0 32 32" width="30" height="30" role="img" aria-label="Wi-Fi Monitor logo"><rect width="32" height="32" rx="7" fill="var(--c1)"/><path d="M6.1 12.1A14 14 0 0 1 25.9 12.1M9.64 15.64A9 9 0 0 1 22.36 15.64M12.82 18.82A4.5 4.5 0 0 1 19.18 18.82" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="16" cy="23.5" r="1.9" fill="#fff"/></svg><h1>Wi-Fi Monitor</h1></span>
+    <span class="pill"><span class="dot" id="dot"></span><span id="status">Loading…</span><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="status">i</span></span>
+    <span class="spacer"></span>
+    <span class="ctl"><label class="switch" title="Nearby-network scans briefly leave your channel and can cost a lost ping. Turn off during important calls."><input type="checkbox" id="scanSwitch" checked><span class="track"></span><span id="scanLabel">Scanning on</span></label><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="scan">i</span></span>
+    <span class="ctl"><select class="day" id="day" title="View a past day"><option value="">Live</option></select><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="day">i</span></span>
+    <span class="ctl"><div class="seg" id="win">
+      <button data-s="900">15m</button>
+      <button data-s="3600" class="on">1h</button>
+      <button data-s="10800">3h</button>
+      <button data-s="0">All</button>
+    </div><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="window">i</span></span>
+    <span class="ctl"><button class="themebtn" id="themeBtn" type="button" title="Switch between automatic (follows your system), light and dark"></button><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="theme">i</span></span>
+  </header>
+
+  <section class="tiles" id="tiles"></section>
+
+  <section class="grid">
+    <div class="card full"><h2>Latency (ms) — red marks are lost pings<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="latency">i</span></h2><div class="chips mk" id="mkchips"></div><div class="chart tall"><canvas id="cLat"></canvas></div><div class="rangehint"><b>Tip:</b> drag across the chart to select a time range, then read its stats below or zoom every chart to it. Press Esc to reset.</div><div id="selpanel" hidden></div><div id="spikes"></div></div>
+    <div class="card"><h2>Signal and noise (dBm)<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="signal">i</span></h2><div class="rangeline"></div><div class="nodata" id="sigNote" hidden></div><div class="chart"><canvas id="cSig"></canvas></div></div>
+    <div class="card"><h2>Signal-to-noise ratio (dB) — aim for 25 or more<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="snrchart">i</span></h2><div class="rangeline"></div><div class="nodata" id="snrNote" hidden></div><div class="chart"><canvas id="cSnr"></canvas></div></div>
+    <div class="card"><h2>Networks sharing your channel (one point per scan) <span id="ownch" style="color:var(--text)"></span><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="sharing">i</span></h2><div class="chart"><canvas id="cCrowd"></canvas></div></div>
+    <div class="card"><h2>Nearby networks by channel (latest scan) — yours highlighted<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="bychannel">i</span></h2><div class="chart"><canvas id="cCh"></canvas></div></div>
+    <div class="card full"><h2>Least crowded channels — average per scan in the selected window (fewer is better)<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="leastcrowded">i</span></h2>
+      <div class="chart"><canvas id="cBlocks"></canvas></div>
+      <div id="bestch" style="margin-top:8px"></div></div>
+    <div class="card"><h2>Transmit rate (Mbps)<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="txchart">i</span></h2><div class="chart"><canvas id="cTx"></canvas></div></div>
+    <div class="card"><h2>Events<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="events">i</span></h2>
+      <form class="addev" id="evform"><input id="evtext" maxlength="200" placeholder="Add a note, e.g. moved to the living room" autocomplete="off"><button class="go" type="submit">Add</button></form>
+      <div class="chips" id="chips"></div>
+      <div id="evmsg"></div>
+      <ul class="events" id="events"></ul></div>
+    <div class="card full"><h2>Daily summary — click a day to open it<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="daily">i</span></h2>
+      <div class="tablewrap"><table class="days"><thead><tr>
+        <th>Day<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_day">i</span></th><th>Samples<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_samples">i</span></th><th>Router loss<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_gwloss">i</span></th><th>Internet loss<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_netloss">i</span></th><th>Router p95<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_gwp95">i</span></th><th>Internet p95<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_netp95">i</span></th>
+        <th>Outage<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_outage">i</span></th><th>Band/ch changes<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_changes">i</span></th><th>Avg RSSI<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_rssi">i</span></th><th>Avg SNR<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_snr">i</span></th><th class="l">Notes<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_notes">i</span></th>
+      </tr></thead><tbody id="daysbody"><tr><td colspan="11" style="color:var(--muted)">Loading…</td></tr></tbody></table></div></div>
+  </section>
+  <footer id="foot"></footer>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const pT = s => new Date(s.replace(' ', 'T')).getTime();
+const fmtT = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtTS = ms => new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const fmtDur = s => s < 60 ? `${Math.round(s)}s` : s < 3600 ? `${Math.floor(s / 60)}m ${Math.round(s % 60)}s` : `${Math.floor(s / 3600)}h ${Math.round((s % 3600) / 60)}m`;
+const STALE_MS = 25000, GAP_MS = 30000, SCAN_GAP_MS = 45 * 60000;
+
+const TIPS = {
+  status: "Health of the latest sample. Healthy: all good. Degraded: a lost ping, SNR under 20 dB, signal weaker than -72 dBm, or internet latency over 150 ms. Down: the router and internet are both unreachable, or Wi-Fi is disconnected. 'No recent data' means the collector is not running or the computer slept.",
+  scan: "Pauses or resumes the nearby-network scans. A scan briefly leaves your channel and can cost a lost ping, so turn it off before important calls. Pings and signal keep being recorded either way.",
+  day: "Live shows a rolling window of recent data. Pick a day to see that whole day from the saved logs. Live refresh pauses for past days.",
+  window: "How much recent history the charts and tiles cover in live view. Choosing one returns you from a past day to live view.",
+  theme: "Cycles Auto (follows your system), Light and Dark. Remembered in this browser.",
+  router: "Ping time to your router, the first hop. Slow or lost replies here mean a Wi-Fi or router problem. Under about 20 ms is typical. The second line shows the median and 95th percentile (19 of 20 pings were faster) for the selected window.",
+  internet: "Ping time to 1.1.1.1 across your whole connection. If the router is fast but this is slow or lost, the problem is beyond your Wi-Fi, such as your ISP. Under about 60 ms is good for calls.",
+  loss: "Share of pings that got no reply in the selected window. Video calls start to suffer above about 1%.",
+  rssi: "How strongly your computer hears the access point, in dBm. Closer to zero is better: -50 is excellent, -67 is about the minimum for reliable calls, -75 or lower is weak. Noise is the background radio level.",
+  snr: "Signal minus noise, in dB. 25 or more is good, below 15 is poor even if the signal looks strong. Not available on Windows.",
+  channel: "The Wi-Fi channel, band, channel width and standard you are connected on. A change means your computer or router switched channels or bands, which briefly interrupts the connection.",
+  tx: "The speed the Wi-Fi link negotiated, in megabits per second. This is not your internet speed. It drops when the signal is weak or the channel is busy.",
+  crowd: "How many other networks overlap your channel in the latest scan. Strong means a signal of -75 dBm or better. More strong neighbours means more waiting for airtime and lag spikes. The count includes your own router.",
+  latency: "Ping times to the router (blue) and the internet (orange) over time. Red crosses at the bottom are lost pings. Dots at the top mark your notes (blue), channel or band changes (purple) and outages (red shading), with grey ticks for scans. Hover a dot for details. Drag across the chart to select a range and analyse it. The table below lists each slow episode with its likely cause. Spikes on both lines point to Wi-Fi trouble. Spikes on the orange line only point beyond your router. Gaps mean nothing was logged.",
+  signal: "Signal strength (RSSI) and the background noise level, in dBm. The wider the gap between the lines, the cleaner the link. Dips in signal usually mean distance or obstacles. Rising noise means interference. Drag across the chart to select a time range, shared with the latency chart.",
+  snrchart: "The gap between signal and noise over time. The dashed line at 25 dB is the target for smooth calls. Drag across the chart to select a time range, shared with the latency chart.",
+  sharing: "How many nearby networks overlap your channel at each scan (blue), and how many of those are strong (orange). Hover a point to see which channel you were on. Counts include your own router.",
+  bychannel: "Number of networks seen on each channel in the latest scan. Your channel is green. Tall bars are crowded channels.",
+  leastcrowded: "Average crowding of each channel block across the scans in the selected window. Fewer networks, especially strong ones, is better. DFS channels are often quiet, but the router must leave them if it detects radar, which can cause a brief disconnect.",
+  txchart: "The negotiated Wi-Fi link speed over time. Frequent drops to low rates mean a weak or noisy link.",
+  events: "A timeline of outages, channel or band changes, gaps where nothing was logged, and your own notes. Type a note when you change something (the quick buttons start a note for you) so you can compare before and after.",
+  daily: "One row per day of logs. Click a row to open that day. Orange and red cells flag high loss, slow pings, or outages.",
+  evcount: "How many things happened in the current view: outages (router and internet both unreachable, or Wi-Fi disconnected), channel or band changes, and notes you added. The Events card lists them with times.",
+  avail: "Share of observed time you were connected and reachable. Time with no data (computer asleep, collector off) is not counted either way. 99.5% or more is healthy. The second line shows the longest single outage.",
+  jitter: "How much the internet ping changes from one sample to the next. Calls need steady delivery: under 10 ms is good, and above 30 ms causes choppy audio and video even when the average ping looks fine. The second line shows the 95th percentile.",
+  callready: "Share of samples good enough for a video call: router ping under 50 ms, internet ping under 150 ms, nothing lost, and signal-to-noise of at least 20 dB (when the system reports it). Worst stretch is the longest unbroken run of samples that were not ready.",
+  d_day: "The calendar day of the log file.",
+  d_samples: "How many measurements were recorded that day. Far fewer than expected means the collector was off or the computer slept.",
+  d_gwloss: "Share of router pings that got no reply.",
+  d_netloss: "Share of internet pings that got no reply.",
+  d_gwp95: "95th-percentile router ping: 19 of 20 pings were faster than this.",
+  d_netp95: "95th-percentile internet ping: 19 of 20 pings were faster than this.",
+  d_outage: "Minutes when both the router and the internet were unreachable, or Wi-Fi was disconnected.",
+  d_changes: "Times the connection moved to a different channel or band.",
+  d_rssi: "Average signal strength that day, in dBm. Closer to zero is better.",
+  d_snr: "Average signal-to-noise ratio that day, in dB. 25 or more is good.",
+  d_notes: "Notes you added that day. Hover a note to see all of them.",
+};
+const TILE_TIPS = { 'Events': 'evcount', 'Availability': 'avail', 'Jitter': 'jitter', 'Call-ready': 'callready', 'Router now': 'router', 'Router (last)': 'router', 'Internet now': 'internet', 'Internet (last)': 'internet', 'Packet loss': 'loss', 'Signal (RSSI)': 'rssi', 'SNR': 'snr', 'Channel': 'channel', 'Tx rate': 'tx', 'Channel crowding': 'crowd' };
+const info = key => `<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="${key}">i</span>`;
+
+// one floating tooltip shared by every (i) icon, so it is never clipped by scrolling tables or cards
+const tipEl = document.createElement('div'); tipEl.id = 'tip'; document.body.appendChild(tipEl);
+let tipOwner = null;
+function showTip(el) {
+  const text = TIPS[el.dataset.tipKey]; if (!text) return;
+  tipOwner = el; tipEl.textContent = text; tipEl.style.display = 'block';
+  const r = el.getBoundingClientRect(), w = tipEl.offsetWidth, h = tipEl.offsetHeight;
+  const left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), window.innerWidth - w - 8);
+  const top = r.bottom + 8 + h > window.innerHeight - 8 ? r.top - h - 8 : r.bottom + 8;
+  tipEl.style.left = left + 'px'; tipEl.style.top = Math.max(8, top) + 'px';
+}
+function hideTip() { tipEl.style.display = 'none'; tipOwner = null; }
+function refreshTip() {  // tiles are re-rendered every few seconds; keep the tooltip if the pointer is still on the new icon
+  if (!tipOwner || tipOwner.isConnected) return;
+  const again = document.querySelector(`.hint[data-tip-key="${tipOwner.dataset.tipKey}"]:hover`);
+  if (again) showTip(again); else hideTip();
+}
+document.addEventListener('mouseover', e => { const el = e.target.closest('.hint'); if (el) showTip(el); });
+document.addEventListener('mouseout', e => { if (e.target.closest('.hint')) hideTip(); });
+document.addEventListener('focusin', e => { const el = e.target.closest && e.target.closest('.hint'); if (el) showTip(el); });
+document.addEventListener('focusout', e => { if (e.target.closest && e.target.closest('.hint')) hideTip(); });
+document.addEventListener('click', e => { const el = e.target.closest('.hint'); if (el) showTip(el); else hideTip(); });
+window.addEventListener('scroll', hideTip, true);
+
+const ISP_LOCK = "Many routers supplied by your internet provider (ISP) hide or lock these settings, such as the channel, channel width, band steering and power. If an option is greyed out or missing, ask the ISP's support to change it for you, ask for a better router, or connect your own router or Wi-Fi access point behind theirs.";
+const FIX = {
+  router: {
+    you: ["Move closer to the router, or remove walls and metal objects between you and it.", "For important calls, use an Ethernet cable. It takes Wi-Fi out of the picture.", "Join the 5 GHz network rather than 2.4 GHz.", "Pause big uploads, backups and streaming on other devices during calls.", "Restart the router if latency creeps up over several days."],
+    router: ["Set a less crowded 5 GHz channel (see Least crowded channels).", "Turn on QoS or WMM and prioritise video calls, if the router has it.", "Install the latest router firmware."],
+    isp: ISP_LOCK },
+  internet: {
+    you: ["Test with a cable. If the problem stays, it is not your Wi-Fi.", "Restart the modem and router: unplug for 30 seconds.", "Pause cloud sync, backups, downloads and video streams on the network."],
+    router: ["Turn on QoS or smart queue (SQM) so calls win over bulk traffic, if available.", "Check for router firmware updates."],
+    isp: "A healthy router ping with slow or lost internet pings points to the line or the provider. Contact your ISP, share the Daily summary table, and ask for a line check. Faulty cabling, splitters or congestion in your area can only be fixed by the ISP." },
+  loss: {
+    you: ["Loss on router pings too: improve signal and reduce interference (see Signal and SNR).", "Loss on internet pings only: restart the modem and router and check cables and connectors.", "Use the Scanning switch to pause scans during calls, since a scan can cost a ping."],
+    router: ["Move to a less crowded channel, turn off band steering, and update the firmware."],
+    isp: "Loss that appears only on the internet ping, especially at certain hours, usually comes from the ISP. Report it together with the Daily summary." },
+  rssi: {
+    you: ["Move closer to the router, or move the router closer to where you work.", "Put the router high, central and in the open, away from metal, mirrors, aquariums and microwaves.", "Aim or tilt external antennas if the router has them.", "Add a mesh node or access point where the signal is weak, ideally connected by Ethernet. A simple range extender often adds lag."],
+    router: ["Check that transmit power is at 100% or High.", "Use 5 GHz close to the router. 2.4 GHz reaches farther but is more crowded."],
+    isp: "ISP routers often cannot raise power or change antennas. Ask for a model with better coverage, or add your own access point." },
+  snr: {
+    you: ["Keep microwaves, baby monitors, cordless phones, Bluetooth gear and USB 3 hubs and drives away from your computer and router. They add noise, mostly on 2.4 GHz.", "Use 5 GHz.", "Use Ethernet for important calls."],
+    router: ["Move to a quieter channel.", "In a crowded building a narrower channel width (40 or 20 MHz) can be more stable than 80 MHz, at the cost of peak speed."],
+    isp: ISP_LOCK },
+  channel: {
+    you: ["Remove the 2.4 GHz network from your known networks so the computer stays on 5 GHz.", "Avoid Wi-Fi power saving during calls (on Windows set the adapter to maximum performance, on a Mac turn off Low Power Mode)."],
+    router: ["Turn off band steering or Smart Connect, or give 2.4 GHz and 5 GHz separate names and join only the 5 GHz one.", "Set a fixed channel instead of Auto, ideally a non-DFS one (36 to 48 or 149 to 161).", "If you see random short disconnects, avoid DFS channels (52 to 144): the router has to leave them when it detects radar."],
+    isp: ISP_LOCK + " Many ISP routers keep the channel on Automatic." },
+  tx: {
+    you: ["This is the Wi-Fi link speed, not your internet plan speed. It follows link quality, so improve signal and noise first (see those tiles).", "Use 5 GHz and a Wi-Fi 5 or Wi-Fi 6 adapter."],
+    router: ["Use 80 MHz width on 5 GHz if the area is quiet, 40 MHz if it is crowded.", "Use WPA2 or WPA3. Old modes such as WEP and TKIP limit speed.", "Replace very old routers."],
+    isp: ISP_LOCK },
+  crowd: {
+    you: ["You cannot control your neighbours, so change what you do control: your channel.", "Prefer 5 GHz, or 6 GHz with a Wi-Fi 6E router. There is more room."],
+    router: ["Set the router to the quietest block shown in Least crowded channels, preferably a non-DFS one.", "Reduce the channel width to 40 MHz if crowding stays high."],
+    isp: ISP_LOCK },
+  latency: {
+    you: ["Both lines spike together: Wi-Fi trouble. Work through the Signal, SNR and crowding tiles.", "Only the orange line spikes: the problem is beyond your router, in the ISP or the internet.", "Spikes at regular intervals: look for something periodic, such as backups, updates, another device, or this tool's scans (pause them with the Scanning switch)."],
+    router: ["Use a fixed, uncrowded channel, turn on QoS or smart queue, and update the firmware."],
+    isp: "Spikes that only show on the internet line are worth reporting to the ISP, with the Daily summary as evidence." },
+  signal: {
+    you: ["Dips that follow you around the home mean distance or walls: move, or add a mesh node.", "A rising noise line means a new interference source nearby (see the SNR tile)."],
+    router: ["If noise rises at certain times of day, try another channel."],
+    isp: "ISP routers often cannot be tuned. Ask for a better one, or add your own access point." },
+  snrchart: {
+    you: ["Drops below the dashed line mean a weaker signal or more interference. The steps are the same as for the SNR tile: reduce nearby noise sources, use 5 GHz, or use Ethernet for calls."],
+    router: ["Move to a quieter channel."],
+    isp: ISP_LOCK },
+  sharing: {
+    you: ["Neighbouring networks are outside your control. A steady count of 3 or more strong ones means you are fighting for airtime."],
+    router: ["Move your router to a quieter channel (see Least crowded channels), and prefer 5 GHz."],
+    isp: ISP_LOCK },
+  bychannel: {
+    you: ["Find the green bar, which is your channel. If it and its neighbours are tall, your spot is crowded."],
+    router: ["Pick a channel with short bars or none. On 5 GHz, channels in the same 80 MHz block count as the same spot."],
+    isp: ISP_LOCK },
+  leastcrowded: {
+    you: ["Note the quietest non-DFS block.", "Change one setting at a time and add a note on the Events card, then compare days in the Daily summary."],
+    router: ["Open the router's Wireless, 5 GHz settings and set the channel to one inside that block (for example 149 for the 149-161 block). Keep the width at 80 MHz, or 40 MHz if it is crowded."],
+    isp: "If the channel field is greyed out, as on many ISP routers, ask the ISP to change it, or add your own router with a configurable channel." },
+  txchart: {
+    you: ["Frequent drops to low rates mean a weak or noisy link. Improve signal and SNR first."],
+    router: ["Use 5 GHz with an 80 MHz channel in a quiet area, WPA2 or WPA3, and current firmware."],
+    isp: ISP_LOCK },
+  events: {
+    you: ["After an outage: restart the router, check cables, turn Wi-Fi off and on, update the operating system and Wi-Fi driver, and forget and re-join the network.", "Turn off Wi-Fi power saving and keep the computer awake during calls.", "Add a note every time you change something, so you can see its effect."],
+    router: ["Check the router's own log for reboots and radar (DFS) events that match your outage times."],
+    isp: "Outages that hit both the router and the internet while the signal is fine can mean the router itself is rebooting or the line dropped. Ask your ISP to check the router and line." },
+  daily: {
+    you: ["Change one thing at a time and compare the day before and after.", "A day with more samples is more reliable than a short one."],
+    router: [],
+    isp: "When you report repeated drops to your ISP, send this table. Packet loss, 95th-percentile latency and outage minutes make a clear case." },
+};
+FIX.evcount = {
+  you: ["Open the Events card to see what happened and when, and add a note for every change you make.", "Several channel or band changes: stop the hopping (see the Channel tile).", "Outages: restart the router, check cables, and work through the Packet loss tile."],
+  router: ["Use a fixed channel, turn off band steering, and update the firmware."],
+  isp: "Repeated outages that hit both the router and the internet while the signal is fine can mean the router is rebooting or the line is dropping. Ask your ISP to check both, and send the Daily summary." };
+FIX.avail = {
+  you: ["Restart the router and check power and network cables.", "Avoid Wi-Fi power saving and keep the computer awake during calls.", "If dips line up with channel or band changes, fix the hopping first."],
+  router: ["Look in the router's own log for reboots, and update or replace it if it restarts by itself."],
+  isp: "Availability dips that hit both the router and the internet usually come from the router or the line. Report them to your ISP together with the Daily summary." };
+FIX.jitter = {
+  you: ["Use Ethernet for important calls.", "Pause uploads, backups and streaming on the network during calls.", "Improve signal and use 5 GHz close to the router. A steady link means steady delivery."],
+  router: ["Turn on QoS or smart queue (SQM). It reduces jitter caused by bulk traffic.", "Move to a less crowded channel."],
+  isp: "High jitter only on the internet ping, with a steady router ping, points to the ISP line or peak-hour congestion. Ask for a line check." };
+FIX.callready = {
+  you: ["Fix whichever tile is red first: router ping, packet loss or SNR.", "Use Ethernet, or 5 GHz close to the router, for calls."],
+  router: ["Prioritise video with QoS or WMM, and use a quieter channel."],
+  isp: "Slow or lost internet pings with a healthy router ping are on the ISP side. " + ISP_LOCK };
+const openFix = new Set();
+const fixBlock = key => {
+  const f = FIX[key]; if (!f) return '';
+  const list = (cls, title, items) => items && items.length ? `<div><h4 class="${cls}">${title}</h4><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul></div>` : '';
+  return `<details class="fix" data-fix="${key}"${openFix.has(key) ? ' open' : ''}><summary>How to improve</summary><div class="fixbody">`
+    + list('you', 'What you can do', f.you) + list('router', 'In your router settings', f.router)
+    + (f.isp ? `<div><h4 class="isp">May be controlled by your ISP</h4><p>${f.isp}</p></div>` : '')
+    + `</div></details>`;
+};
+document.addEventListener('toggle', e => { const d = e.target; if (d.matches && d.matches('details.fix')) { if (d.open) openFix.add(d.dataset.fix); else openFix.delete(d.dataset.fix); } }, true);
+
+// ---- event markers on the latency chart and the "likely cause" analysis
+const markerVis = { notes: true, changes: true, outages: true, scans: true };
+const MARKER_NAMES = { notes: 'Notes', changes: 'Channel/band changes', outages: 'Outages and gaps', scans: 'Scans' };
+const markerColor = t => ({ notes: css('--c1'), changes: css('--c2'), outages: css('--bad'), scans: css('--muted') })[t];
+
+const markerPlugin = {
+  id: 'markers',
+  afterDatasetsDraw(chart) {
+    const ms = chart.$markers; chart.$hit = [];
+    if (!ms) return;
+    const { ctx, chartArea: a, scales: { x } } = chart;
+    ctx.save(); ctx.beginPath(); ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top); ctx.clip();
+    for (const m of ms) {
+      if (!markerVis[m.type]) continue;
+      const px = x.getPixelForValue(m.x), px1 = m.x1 != null ? x.getPixelForValue(m.x1) : px;
+      if (m.x1 != null) {
+        ctx.globalAlpha = m.kind === 'gap' ? 0.10 : 0.16; ctx.fillStyle = m.kind === 'gap' ? css('--muted') : css('--bad');
+        ctx.fillRect(px, a.top, Math.max(2, px1 - px), a.bottom - a.top); ctx.globalAlpha = 1;
+      }
+      const col = markerColor(m.type);
+      ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = m.type === 'scans' ? 1 : 1.5;
+      ctx.setLineDash(m.type === 'scans' ? [] : [4, 3]); ctx.globalAlpha = m.type === 'scans' ? 0.7 : 0.9;
+      ctx.beginPath(); ctx.moveTo(px, a.top); ctx.lineTo(px, m.type === 'scans' ? a.top + 10 : a.bottom); ctx.stroke();
+      ctx.globalAlpha = 1; ctx.setLineDash([]);
+      if (m.type !== 'scans') { ctx.beginPath(); ctx.arc(px, a.top + 6, 4, 0, 7); ctx.fill(); }
+      chart.$hit.push({ x0: px - 6, x1: Math.max(px + 6, px1), m });
+    }
+    ctx.restore();
+  },
+};
+
+// the dragged or selected time range, drawn as a band on every chart that supports selection
+const bandPlugin = {
+  id: 'band',
+  afterDatasetsDraw(chart) {
+    const band = chart.$drag || (!zoom ? sel : null);
+    if (!band) return;
+    const { ctx, chartArea: a, scales: { x } } = chart;
+    const p0 = x.getPixelForValue(band.a), p1 = x.getPixelForValue(band.b);
+    ctx.save(); ctx.beginPath(); ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top); ctx.clip();
+    ctx.globalAlpha = 0.14; ctx.fillStyle = css('--c1'); ctx.fillRect(p0, a.top, p1 - p0, a.bottom - a.top);
+    ctx.globalAlpha = 0.85; ctx.strokeStyle = css('--c1'); ctx.lineWidth = 1; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(p0, a.top); ctx.lineTo(p0, a.bottom); ctx.moveTo(p1, a.top); ctx.lineTo(p1, a.bottom); ctx.stroke();
+    ctx.restore();
+  },
+};
+
+function buildMarkers(rows) {
+  const out = []; let down = null, prev = null, prevKey = null;
+  for (const d of rows) {
+    if (prev && d.x - prev.x > GAP_MS) out.push({ type: 'outages', kind: 'gap', x: prev.x, x1: d.x, text: `No data for ${fmtDur((d.x - prev.x) / 1000)} (collector stopped or computer asleep)` });
+    const isDown = (d.gwLost && d.netLost) || d.assoc === false;
+    if (isDown && !down) down = { x: d.x };
+    else if (!isDown && down) { out.push({ type: 'outages', kind: 'outage', x: down.x, x1: d.x, text: `Outage: router and internet unreachable for about ${fmtDur((d.x - down.x) / 1000)}` }); down = null; }
+    if (d.ch != null) {
+      const k = `${d.ch} / ${d.band} GHz`;
+      if (prevKey && prevKey !== k) out.push({ type: 'changes', x: d.x, text: `Channel or band changed: ${prevKey} → ${k}` });
+      prevKey = k;
+    }
+    prev = d;
+  }
+  if (down && prev) out.push({ type: 'outages', kind: 'outage', x: down.x, x1: prev.x, text: `Outage ongoing since ${fmtTS(down.x)}` });
+  if (rows.length) {
+    for (const n of notes) if (n.x >= rows[0].x) out.push({ type: 'notes', x: n.x, text: `Note: ${n.text}` });
+    for (const sc of scans) if (sc.x >= rows[0].x) out.push({ type: 'scans', x: sc.x, text: 'Nearby-network scan (this tool)' });
+  }
+  return out;
+}
+
+// Heuristic: group consecutive slow or lost samples into episodes and look at what changed at the same moment.
+function analyzeSpikes(rows, markers) {
+  const spiky = d => d.gwLost || d.netLost || (d.gw != null && d.gw > 100) || (d.net != null && d.net > 200);
+  const eps = []; let cur = null;
+  for (const d of rows) {
+    if (!spiky(d)) continue;
+    if (cur && d.x - cur.end <= 15000) { cur.rows.push(d); cur.end = d.x; } else { cur = { start: d.x, end: d.x, rows: [d] }; eps.push(cur); }
+  }
+  const near = (type, e, pad) => markers.some(m => m.type === type && m.x >= e.start - pad && m.x <= e.end + pad);
+  return eps.map(e => {
+    const r = e.rows;
+    const gwBad = r.some(d => d.gwLost || (d.gw != null && d.gw > 100)), netBad = r.some(d => d.netLost || (d.net != null && d.net > 200));
+    const weak = r.some(d => (d.snr != null && d.snr < 15) || (d.rssi != null && d.rssi < -75));
+    let cause, group;
+    if (r.some(d => d.assoc === false)) [cause, group] = ['Wi-Fi disconnected or roaming', 'Wi-Fi'];
+    else if (near('changes', e, 15000)) [cause, group] = ['Channel or band change', 'Wi-Fi'];
+    else if (near('scans', e, 10000)) [cause, group] = ['Nearby-network scan by this tool (pause scanning during calls)', 'This tool'];
+    else if (weak && gwBad) [cause, group] = ['Weak signal or a noise burst', 'Wi-Fi'];
+    else if (gwBad) [cause, group] = ['Wi-Fi congestion or a busy router', 'Wi-Fi'];
+    else if (netBad) [cause, group] = ['Beyond your router (ISP or internet)', 'ISP or internet'];
+    else [cause, group] = ['Unclear', 'Unclear'];
+    const note = notes.filter(n => n.x <= e.start && e.start - n.x <= 120000).pop();
+    return { start: e.start, cause, group, lost: r.filter(d => d.gwLost || d.netLost).length, note: note && note.text,
+      peakGw: Math.max(0, ...r.map(d => d.gw || 0)), peakNet: Math.max(0, ...r.map(d => d.net || 0)) };
+  });
+}
+
+// Headline quality numbers for the tile row
+function qualityStats(rows, xmin, xmax) {
+  const mk = buildMarkers(rows).filter(m => m.x >= xmin && m.x <= xmax);
+  const outages = mk.filter(m => m.kind === 'outage'), changes = mk.filter(m => m.type === 'changes').length, noteN = mk.filter(m => m.type === 'notes').length;
+  const longest = outages.reduce((a, m) => Math.max(a, m.x1 - m.x), 0);
+  // availability: observed time only (gaps with no data are skipped); a sample counts as down when router and internet are both lost, or Wi-Fi is disconnected
+  let seen = 0, down = 0, jit = [];
+  const gaps = [];
+  for (let i = 0; i + 1 < rows.length; i++) {
+    const a = rows[i], b = rows[i + 1], dt = b.x - a.x;
+    if (dt <= GAP_MS) {
+      seen += dt; gaps.push(dt);
+      if ((a.gwLost && a.netLost) || a.assoc === false) down += dt;
+      if (a.net != null && b.net != null) jit.push(Math.abs(b.net - a.net));
+    }
+  }
+  gaps.sort((x, y) => x - y);
+  const step = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 5000;
+  // call-ready: share of samples meeting thresholds, and the longest run that did not
+  const ready = d => d.gw != null && d.gw < 50 && d.net != null && d.net < 150 && !d.gwLost && !d.netLost && d.assoc !== false && (d.snr == null || d.snr >= 20);
+  let ok = 0, runStart = null, runEnd = null, worst = 0;
+  for (const d of rows) {
+    if (ready(d)) { ok++; runStart = null; }
+    else { if (runStart == null) runStart = d.x; runEnd = d.x; worst = Math.max(worst, runEnd - runStart + step); }
+  }
+  return {
+    outages: outages.length, changes, notes: noteN, longest,
+    avail: seen ? 100 * (1 - down / seen) : null,
+    jitter: jit.length ? jit.reduce((x, y) => x + y, 0) / jit.length : null, jitterP95: pct(jit, .95),
+    call: rows.length ? 100 * ok / rows.length : null, worst: ok === rows.length ? 0 : worst,
+  };
+}
+
+function renderSpikes(rows, markers) {
+  const eps = analyzeSpikes(rows, markers);
+  if (!rows.length) { $('#spikes').innerHTML = ''; return; }
+  if (!eps.length) { $('#spikes').innerHTML = '<div class="sum" style="color:var(--good)">No slow or lost-ping episodes in this window.</div>'; return; }
+  const by = {}; eps.forEach(e => by[e.group] = (by[e.group] || 0) + 1);
+  const sum = Object.entries(by).sort((a, b) => b[1] - a[1]).map(([g, n]) => `<b>${n}</b> ${g}`).join(' · ');
+  const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const trs = eps.slice(-8).reverse().map(e => `<tr><td>${fmtTS(e.start)}</td><td>${e.peakGw ? f1(e.peakGw) + ' ms' : '–'}</td><td>${e.peakNet ? f1(e.peakNet) + ' ms' : '–'}</td><td>${e.lost || ''}</td>
+    <td class="l">${e.cause}${e.note ? `<br><span style="color:var(--muted)">after your note: ${esc(e.note)}</span>` : ''}</td></tr>`).join('');
+  $('#spikes').innerHTML = `<div class="sum"><b>${eps.length}</b> slow or lost-ping episodes in this window — likely causes: ${sum}</div>
+    <div class="tablewrap"><table class="days spikes"><thead><tr><th>Started</th><th>Worst router</th><th>Worst internet</th><th>Lost</th><th class="l">Likely cause</th></tr></thead><tbody>${trs}</tbody></table></div>
+    <div class="cap">Heuristic: an episode is a router ping over 100 ms, an internet ping over 200 ms, or any lost ping. The cause is the first thing that changed at the same moment: a disconnect, a channel or band change, a scan, weak signal, then router versus internet latency. Showing the latest ${Math.min(8, eps.length)}.</div>`;
+}
+
+let sel = null, zoom = null;  // sel: dragged range awaiting a decision; zoom: range every chart is zoomed to (ms since epoch)
+let winSec = 3600, all = [], scans = [], notes = [], days = [], day = null, daysAt = 0, charts = {};
+const todayStr = () => new Date().toLocaleDateString('en-CA');
+const isPast = () => !!day && day !== todayStr();
+
+function mkChart(id, datasets, yOpts, extra = {}, plugins = []) {
+  return new Chart($(id), {
+    type: 'line',
+    data: { datasets },
+    plugins,
+    options: {
+      parsing: false, animation: false, maintainAspectRatio: false, normalized: true,
+      interaction: { mode: 'nearest', axis: 'x', intersect: false },
+      plugins: {
+        legend: { labels: { color: css('--muted'), boxWidth: 12, usePointStyle: true } },
+        tooltip: { callbacks: { title: it => fmtTS(it[0].parsed.x) } },
+      },
+      scales: {
+        x: { type: 'linear', ticks: { color: css('--muted'), maxTicksLimit: 8, callback: v => fmtT(v) }, grid: { color: css('--grid') } },
+        y: { ticks: { color: css('--muted') }, grid: { color: css('--grid') }, ...yOpts },
+      },
+      ...extra,
+    },
+  });
+}
+const line = (label, color, extra = {}) => ({ label, data: [], borderColor: color, backgroundColor: color, borderWidth: 1.6, pointRadius: 0, pointHoverRadius: 4, tension: 0, ...extra });
+
+function init() {
+  Chart.defaults.font.family = getComputedStyle(document.body).fontFamily;
+  charts.lat = mkChart('#cLat', [
+    line('Router (gateway)', css('--c1')),
+    line('Internet (1.1.1.1)', css('--c3')),
+    { label: 'Lost ping', data: [], showLine: false, pointStyle: 'crossRot', pointRadius: 6, borderWidth: 2, borderColor: css('--bad'), backgroundColor: css('--bad') },
+  ], { beginAtZero: true, suggestedMax: 100 }, {}, [markerPlugin, bandPlugin]);
+  charts.lat.options.plugins.tooltip.filter = () => !charts.lat.$markerHover;  // hide the data tooltip while a marker tooltip is showing
+  charts.sig = mkChart('#cSig', [line('RSSI', css('--c1')), line('Noise', css('--muted'))], { suggestedMin: -100, suggestedMax: -40 }, {}, [bandPlugin]);
+  charts.snr = mkChart('#cSnr', [
+    line('SNR', css('--c2')),
+    line('Good threshold (25)', css('--good'), { borderDash: [5, 4], borderWidth: 1, pointHoverRadius: 0 }),
+  ], { suggestedMin: 0, suggestedMax: 50 }, {}, [bandPlugin]);
+  charts.crowd = mkChart('#cCrowd', [
+    line('Sharing your channel (includes your router)', css('--c1'), { pointRadius: 3 }),
+    line('Strong (≥ -75 dBm)', css('--c3'), { pointRadius: 3 }),
+  ], { beginAtZero: true, ticks: { precision: 0 } });
+  charts.crowd.options.plugins.tooltip.callbacks.afterBody = it => { const o = it[0].raw && it[0].raw.own; return o ? `Your channel: ${ownText(o)}` : ''; };
+  charts.ch = new Chart($('#cCh'), {
+    type: 'bar',
+    data: { labels: [], datasets: [{ label: 'Networks', data: [], backgroundColor: [] }] },
+    options: {
+      animation: false, maintainAspectRatio: false,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: css('--muted'), maxRotation: 90, minRotation: 60, autoSkip: false, font: { size: 10 } }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: css('--muted'), precision: 0 }, grid: { color: css('--grid') } },
+      },
+    },
+  });
+  charts.blocks = new Chart($('#cBlocks'), {
+    type: 'bar',
+    data: { labels: [], datasets: [
+      { label: 'Strong networks (≥ -75 dBm)', data: [], backgroundColor: css('--c3') },
+      { label: 'All networks', data: [], backgroundColor: css('--c1') },
+    ] },
+    options: {
+      animation: false, maintainAspectRatio: false,
+      plugins: { legend: { labels: { color: css('--muted'), boxWidth: 12 } } },
+      scales: {
+        x: { ticks: { color: css('--muted'), autoSkip: false, maxRotation: 60, font: { size: 11 } }, grid: { display: false } },
+        y: { beginAtZero: true, ticks: { color: css('--muted') }, grid: { color: css('--grid') } },
+      },
+    },
+  });
+  charts.tx = mkChart('#cTx', [line('Tx rate', css('--c3'), { stepped: true })], { beginAtZero: true });
+}
+
+// series with a break wherever samples are more than GAP_MS apart (sleep, logger stopped)
+function series(rows, fn, gap = GAP_MS) {
+  const out = []; let prev = null;
+  for (const d of rows) {
+    if (prev && d.x - prev.x > gap) out.push({ x: prev.x + 1, y: null });
+    out.push({ x: d.x, y: fn(d), own: d.own });
+    prev = d;
+  }
+  return out;
+}
+
+function tile(k, v, s = '', color = '') {
+  return `<div class="tile"><div class="k">${k}${TILE_TIPS[k] ? info(TILE_TIPS[k]) : ''}</div><div class="v" style="${color ? 'color:' + color : ''}">${v}</div><div class="s">${s}</div>${TILE_TIPS[k] ? fixBlock(TILE_TIPS[k]) : ''}</div>`;
+}
+const pct = (arr, p) => { if (!arr.length) return null; const a = [...arr].sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(a.length * p))]; };
+const f1 = v => v == null ? '–' : (Math.round(v * 10) / 10).toString();
+
+function events(rows) {
+  const ev = []; let out = null, prev = null, prevCh = null;
+  for (const d of rows) {
+    if (prev && d.x - prev.x > GAP_MS) ev.push({ x: prev.x, tag: 'warn', label: 'NO DATA', text: `Logger silent for ${fmtDur((d.x - prev.x) / 1000)} (Mac asleep or logger stopped)` });
+    const down = (d.gwLost && d.netLost) || d.assoc === false;
+    if (down && !out) out = { start: d.x, last: d.x };
+    else if (down && out) out.last = d.x;
+    else if (!down && out) { ev.push({ x: out.start, tag: 'bad', label: 'OUTAGE', text: `Router and internet unreachable for ~${fmtDur((d.x - out.start) / 1000)}` }); out = null; }
+    if (d.ch != null) {
+      const key = `${d.ch}/${d.band}`;
+      if (prevCh && prevCh !== key) ev.push({ x: d.x, tag: 'info', label: 'CHANNEL', text: `Changed ${prevCh} → ${key}` });
+      prevCh = key;
+    }
+    prev = d;
+  }
+  if (out) ev.push({ x: out.start, tag: 'bad', label: 'OUTAGE', text: `Ongoing — since ${fmtTS(out.start)}` });
+  for (const n of notes) if ((!rows.length || n.x >= rows[0].x) && (!zoom || n.x <= zoom.b)) ev.push({ x: n.x, tag: 'info', label: 'NOTE', text: n.text });
+  return ev.sort((a, b) => b.x - a.x).slice(0, 15);
+}
+
+function render() {
+  const now = Date.now();
+  const past = isPast();
+  const d0 = day ? new Date(day + 'T00:00:00').getTime() : 0;
+  const cutoff = day ? d0 : (winSec ? now - winSec * 1000 : 0);
+  let rows = all.filter(d => d.x >= cutoff);
+  let xmin = day ? d0 : (winSec ? cutoff : (rows[0] ? rows[0].x : now - 60000));
+  let xmax = past ? d0 + 86400000 : now;
+  if (zoom) { rows = rows.filter(d => d.x >= zoom.a && d.x <= zoom.b); xmin = zoom.a; xmax = zoom.b; }
+  const last = zoom ? rows[rows.length - 1] : all[all.length - 1];
+
+  // status
+  const stale = !last || now - last.x > STALE_MS;
+  let st = ['Healthy', 'good'];
+  if (zoom) st = [`Zoomed ${fmtTS(zoom.a)} – ${fmtTS(zoom.b)}`, 'c1'];
+  else if (past) st = [`Viewing ${day}`, 'c1'];
+  else if (stale) st = ['No recent data — is the logger running?', 'warn'];
+  else if (last.assoc === false || (last.gwLost && last.netLost)) st = ['Down', 'bad'];
+  else if (last.gwLost || last.netLost || (last.snr != null && last.snr < 20) || (last.rssi != null && last.rssi < -72) || (last.net != null && last.net > 150)) st = ['Degraded', 'warn'];
+  $('#status').textContent = st[0]; $('#dot').style.background = css('--' + st[1]);
+
+  // tiles
+  const gwOk = rows.filter(d => d.gw != null).map(d => d.gw);
+  const netOk = rows.filter(d => d.net != null).map(d => d.net);
+  const gwLost = rows.filter(d => d.gwLost).length, netLost = rows.filter(d => d.netLost).length;
+  const lp = n => rows.length ? (100 * n / rows.length).toFixed(1) + '%' : '–';
+  const sev = (v, warn, bad) => v == null ? '' : v >= bad ? css('--bad') : v >= warn ? css('--warn') : css('--good');
+  const rs = (last && last.rssi != null) ? last.rssi : null;
+  const q = qualityStats(rows, xmin, xmax);
+  const evTotal = q.outages + q.changes + q.notes, plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  $('#tiles').innerHTML = [
+    tile(past || zoom ? 'Router (last)' : 'Router now', last && last.gw != null ? f1(last.gw) + ' ms' : (last && last.gwLost ? 'LOST' : '–'), `median ${f1(pct(gwOk, .5))} · p95 ${f1(pct(gwOk, .95))} ms`, last && last.gwLost ? css('--bad') : sev(last && last.gw, 50, 150)),
+    tile(past || zoom ? 'Internet (last)' : 'Internet now', last && last.net != null ? f1(last.net) + ' ms' : (last && last.netLost ? 'LOST' : '–'), `median ${f1(pct(netOk, .5))} · p95 ${f1(pct(netOk, .95))} ms`, last && last.netLost ? css('--bad') : sev(last && last.net, 100, 200)),
+    tile('Packet loss', lp(netLost), `router ${lp(gwLost)} · internet ${lp(netLost)}`, sev(rows.length ? 100 * netLost / rows.length : null, 1, 5)),
+    tile('Signal (RSSI)', rs != null ? rs + ' dBm' : 'n/a', last && last.noise != null ? `noise ${last.noise} dBm` : (rs != null ? 'noise not reported' : ''), rs == null ? '' : rs <= -75 ? css('--bad') : rs <= -67 ? css('--warn') : css('--good')),
+    tile('SNR', last && last.snr != null ? last.snr + ' dB' : 'n/a', last && last.snr != null ? 'aim for 25+' : 'not reported here', last && last.snr != null ? (last.snr < 15 ? css('--bad') : last.snr < 25 ? css('--warn') : css('--good')) : ''),
+    tile('Channel', last && last.ch != null ? `${last.ch}` : 'n/a', last && last.ch != null ? [`${last.band} GHz`, last.width != null ? `${last.width} MHz` : null, last.phy ? `802.${last.phy}` : null].filter(Boolean).join(' · ') : ''),
+    tile('Tx rate', last && last.tx != null ? last.tx + ' Mbps' : 'n/a', ''),
+    tile('Events', rows.length ? evTotal : 'n/a', rows.length ? `${plural(q.outages, 'outage')} · ${plural(q.changes, 'channel change')} · ${plural(q.notes, 'note')}` : '', q.outages ? css('--bad') : q.changes >= 3 ? css('--warn') : css('--good')),
+    tile('Availability', q.avail == null ? 'n/a' : (q.avail >= 99.95 ? '100' : q.avail.toFixed(1)) + '%', q.avail == null ? '' : q.longest ? `longest outage ${fmtDur(q.longest / 1000)}` : 'no outages', q.avail == null ? '' : q.avail >= 99.5 ? css('--good') : q.avail >= 98 ? css('--warn') : css('--bad')),
+    tile('Jitter', q.jitter == null ? 'n/a' : f1(q.jitter) + ' ms', q.jitter == null ? '' : `p95 ${f1(q.jitterP95)} ms`, q.jitter == null ? '' : q.jitter < 10 ? css('--good') : q.jitter <= 30 ? css('--warn') : css('--bad')),
+    tile('Call-ready', q.call == null ? 'n/a' : q.call.toFixed(0) + '%', q.call == null ? '' : q.worst ? `worst stretch ${fmtDur(q.worst / 1000)}` : 'no bad stretches', q.call == null ? '' : q.call >= 95 ? css('--good') : q.call >= 85 ? css('--warn') : css('--bad')),
+  ].join('') + '<span id="crowdtile" style="display:contents"></span>';
+
+  // charts
+  const set = (c, arrs, min, max) => { arrs.forEach((a, i) => c.data.datasets[i].data = a); c.options.scales.x.min = min; c.options.scales.x.max = max; c.update('none'); };
+  const lost = rows.filter(d => d.gwLost || d.netLost).map(d => ({ x: d.x, y: 0 }));
+  const hasWifi = rows.filter(d => d.rssi != null);
+  const markers = buildMarkers(rows);
+  charts.lat.$markers = markers;
+  set(charts.lat, [series(rows, d => d.gw), series(rows, d => d.net), lost], xmin, xmax);
+  renderSpikes(rows, markers);
+  const anyRssi = hasWifi.length > 0, anyNoise = rows.some(d => d.noise != null), anySnr = rows.some(d => d.snr != null);
+  const NO_WIFI = 'No Wi-Fi signal details are in the log for this range. Windows: check that Location is on and the display language is English. macOS: check that the Wi-Fi helper was built (see the README).';
+  const setNote = (id, text) => { const el = $(id); el.hidden = !text; el.textContent = text || ''; };
+  setNote('#sigNote', rows.length && !anyRssi ? NO_WIFI : anyRssi && !anyNoise ? 'The noise level is not reported on this system (for example Windows), so only signal strength is shown.' : '');
+  setNote('#snrNote', rows.length && !anyRssi ? NO_WIFI : anyRssi && !anySnr ? 'SNR needs the noise level, which this system does not report (for example Windows). The Signal chart above still shows signal strength.' : '');
+  charts.sig.data.datasets[1].hidden = !anyNoise;
+  set(charts.sig, [series(hasWifi, d => d.rssi), series(hasWifi, d => d.noise)], xmin, xmax);
+  set(charts.snr, [series(hasWifi, d => d.snr), anySnr ? [{ x: xmin, y: 25 }, { x: xmax, y: 25 }] : []], xmin, xmax);
+  set(charts.tx, [series(hasWifi, d => d.tx)], xmin, xmax);
+
+  // crowding
+  const sc = scans.filter(d => d.x >= (zoom ? zoom.a : cutoff) && (!zoom || d.x <= zoom.b));
+  set(charts.crowd, [series(sc, d => d.overlap, SCAN_GAP_MS), series(sc, d => d.strong, SCAN_GAP_MS)], xmin, xmax);
+  const ls = scans[scans.length - 1];
+  $('#ownch').textContent = ls && ls.own ? `— ${ownText(ls.own)}` : '';
+  if (ls) {
+    const ownKey = ls.own ? `${ls.own[1]}:${ls.own[0]}` : null;
+    const keys = Object.keys(ls.counts).sort((a, b) => { const [ba, ca] = a.split(':'), [bb, cb] = b.split(':'); return (ba === bb ? 0 : parseFloat(ba) - parseFloat(bb)) || (ca - cb); });
+    const ds = charts.ch.data.datasets[0];
+    charts.ch.data.labels = keys.map(k => { const [b, c] = k.split(':'); return `${b === '2.4' ? '2.4G' : b + 'G'} ch${c}`; });
+    ds.data = keys.map(k => ls.counts[k]);
+    ds.backgroundColor = keys.map(k => k === ownKey ? css('--good') : css('--c1'));
+    charts.ch.update('none');
+  }
+  $('#crowdtile').innerHTML = ls
+    ? tile('Channel crowding', `${ls.overlap}`, `${ls.strong} strong · ${ls.total} networks nearby · ${fmtT(ls.x)}`, ls.strong >= 4 ? css('--bad') : ls.strong >= 2 ? css('--warn') : css('--good'))
+    : tile('Channel crowding', 'n/a', 'waiting for first scan');
+
+  // least crowded channels (average over scans in window)
+  const agg = {}; let nScans = 0, mineKey = null;
+  for (const d of sc) {
+    if (!d.blocks) continue; nScans++; mineKey = d.mine || mineKey;
+    for (const b of d.blocks) { const a = agg[b.k] || (agg[b.k] = { k: b.k, dfs: b.dfs, total: 0, strong: 0 }); a.total += b.total; a.strong += b.strong; }
+  }
+  const list = Object.values(agg).map(a => ({ ...a, total: a.total / nScans, strong: a.strong / nScans }));
+  const rank = (x, y) => (x.strong - y.strong) || (x.total - y.total);
+  charts.blocks.data.labels = list.map(a => a.k + (a.dfs ? ' (DFS)' : '') + (a.k === mineKey ? ' ← yours' : ''));
+  charts.blocks.data.datasets[0].data = list.map(a => +a.strong.toFixed(1));
+  charts.blocks.data.datasets[1].data = list.map(a => +a.total.toFixed(1));
+  charts.blocks.update('none');
+  const five = list.filter(a => a.k.startsWith('5G'));
+  const bestAny = [...five].sort(rank)[0], bestSafe = [...five.filter(a => !a.dfs)].sort(rank)[0];
+  const desc = a => `<b>${a.k}</b> — ${f1(a.strong)} strong, ${f1(a.total)} total`;
+  $('#bestch').innerHTML = nScans
+    ? `<span style="color:var(--muted)">Based on ${nScans} scan${nScans > 1 ? 's' : ''}. Quietest 5 GHz: </span>${desc(bestAny)}${bestAny.dfs ? ` <span style="color:var(--muted)">(DFS: routers must back off if radar is detected)</span>` : ''}` +
+      (bestSafe && bestSafe.k !== bestAny.k ? `<br><span style="color:var(--muted)">Quietest without DFS: </span>${desc(bestSafe)}` : '') +
+      `<br><span style="color:var(--muted)">Your block includes your own router (counts as 1).</span>`
+    : '<span style="color:var(--muted)">Waiting for scans…</span>';
+
+  // events
+  const ev = events(rows);
+  $('#events').innerHTML = ev.length
+    ? ev.map(e => `<li><span class="when">${fmtTS(e.x)}</span><span class="tag ${e.tag}">${e.label}</span><span>${e.text}</span></li>`).join('')
+    : '<li><span style="color:var(--muted)">No events in this window.</span></li>';
+
+  $('#foot').textContent = zoom
+    ? `Zoomed view ${fmtTS(zoom.a)} – ${fmtTS(zoom.b)} · ${rows.length} samples · live refresh paused (Reset zoom to resume)`
+    : past
+    ? `Day view ${day} · ${rows.length} samples · source: logs/`
+    : `Updated ${fmtTS(now)} · ${rows.length} samples in window · refreshes every 5s · source: logs/`;
+  document.querySelector('#win').classList.toggle('dim', !!day);
+  viewRange = { a: xmin, b: xmax };
+  renderSel();
+  refreshTip();
+}
+
+// ---- days: picker and summary table
+const dayLabel = d => new Date(d + 'T00:00:00').toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric' });
+function renderDays() {
+  const sel = $('#day');
+  sel.innerHTML = '<option value="">Live</option>' + days.map(d => `<option value="${d.day}">${dayLabel(d.day)}${d.day === todayStr() ? ' (today)' : ''} · ${d.samples} samples</option>`).join('');
+  sel.value = day || '';
+  const cls = (v, warn, bad) => v == null ? '' : v >= bad ? 'bad' : v >= warn ? 'warn' : 'good';
+  const num = (v, suffix = '') => v == null ? '–' : f1(v) + suffix;
+  $('#daysbody').innerHTML = days.length ? days.map(d => {
+    const first = d.notes[0] ? d.notes[0] : '', more = d.notes.length > 1 ? ` (+${d.notes.length - 1} more)` : '';
+    return `<tr data-day="${d.day}" class="${d.day === day ? 'sel' : ''}">
+      <td>${dayLabel(d.day)}${d.day === todayStr() ? ' (today)' : ''}</td><td>${d.samples}</td>
+      <td class="${cls(d.gwLoss, 1, 5)}">${num(d.gwLoss, '%')}</td><td class="${cls(d.netLoss, 1, 5)}">${num(d.netLoss, '%')}</td>
+      <td class="${cls(d.gwP95, 50, 150)}">${num(d.gwP95, ' ms')}</td><td class="${cls(d.netP95, 100, 200)}">${num(d.netP95, ' ms')}</td>
+      <td class="${cls(d.outageMin, 0.5, 5)}">${d.outageMin} min</td><td class="${cls(d.changes, 1, 5)}">${d.changes}</td>
+      <td>${d.rssi == null ? '–' : d.rssi + ' dBm'}</td><td>${d.snr == null ? '–' : d.snr + ' dB'}</td>
+      <td class="l" title="${d.notes.join(' | ').replace(/"/g, '&quot;')}">${first.replace(/</g, '&lt;')}${more}</td></tr>`;
+  }).join('') : '<tr><td colspan="11" style="color:var(--muted)">No log files yet.</td></tr>';
+}
+async function loadDays() {
+  daysAt = Date.now();
+  try { days = await (await fetch('/api/days', { cache: 'no-store' })).json(); renderDays(); } catch (e) { /* keep the old table */ }
+}
+// ---- scan on/off switch (shared with the collector through the control file)
+function showScan(paused) {
+  $('#scanSwitch').checked = !paused;
+  $('#scanLabel').textContent = paused ? 'Scanning paused' : 'Scanning on';
+}
+async function loadControl() {
+  try { showScan((await (await fetch('/api/control', { cache: 'no-store' })).json()).scan_paused); } catch (e) { /* keep last state */ }
+}
+$('#scanSwitch').addEventListener('change', async e => {
+  const paused = !e.target.checked;
+  showScan(paused);
+  try {
+    const r = await fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scan_paused: paused }) });
+    if (!r.ok) throw new Error(r.status);
+    load();  // pick up the note the server logged
+  } catch (err) { showScan(!paused); $('#evmsg').textContent = 'Could not change scanning (is the dashboard server running?)'; }
+});
+
+function pickDay(value) {
+  day = value || null; sel = null; zoom = null;
+  document.querySelectorAll('#win button').forEach(x => x.classList.toggle('on', !day && +x.dataset.s === winSec));
+  renderDays(); load();
+}
+$('#day').addEventListener('change', e => pickDay(e.target.value));
+$('#daysbody').addEventListener('click', e => { const tr = e.target.closest('tr[data-day]'); if (tr) { pickDay(tr.dataset.day); window.scrollTo({ top: 0, behavior: 'smooth' }); } });
+
+async function load() {
+  try {
+    const q = day ? `?day=${day}` : '';
+    const r = await fetch('/api/data' + q, { cache: 'no-store' });
+    all = (await r.json()).map(d => ({ ...d, x: pT(d.t) }));
+    try { scans = (await (await fetch('/api/scan' + q, { cache: 'no-store' })).json()).map(d => ({ ...d, x: pT(d.t) })); } catch (e) { scans = []; }
+    try { notes = (await (await fetch('/api/events' + q, { cache: 'no-store' })).json()).map(d => ({ ...d, x: pT(d.t) })); } catch (e) { notes = []; }
+    render();
+    if (Date.now() - daysAt > 60000) loadDays();
+    loadControl();
+  } catch (e) {
+    $('#status').textContent = 'Dashboard server unreachable'; $('#dot').style.background = css('--bad');
+  }
+}
+
+const CHIPS = ['Changed router setting', 'Reconnected to Wi-Fi', 'Switched network', 'Moved location', 'Joined call', 'Left call', 'Restarted router'];
+$('#chips').innerHTML = CHIPS.map(c => `<button type="button">${c}</button>`).join('');
+async function addEvent(text) {
+  text = text.trim(); if (!text) return;
+  try {
+    const r = await fetch('/api/event', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text }) });
+    if (!r.ok) throw new Error(r.status);
+    $('#evmsg').textContent = `Added: ${text}`; $('#evtext').value = ''; load(); loadDays();
+  } catch (e) { $('#evmsg').textContent = 'Could not save the note (is the dashboard server running?)'; }
+}
+$('#evform').addEventListener('submit', e => { e.preventDefault(); addEvent($('#evtext').value); });
+$('#chips').addEventListener('click', e => { const b = e.target.closest('button'); if (b) { $('#evtext').value = b.textContent + ': '; $('#evtext').focus(); } });
+
+$('#win').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#win button').forEach(x => x.classList.toggle('on', x === b));
+  winSec = +b.dataset.s; sel = null; zoom = null;
+  if (day) pickDay(''); else render();
+});
+// ---- theme: Auto (follows the OS), Light, Dark; remembered in this browser
+const THEMES = ['auto', 'light', 'dark'], THEME_LABEL = { auto: '◐ Auto', light: '☀ Light', dark: '☾ Dark' };
+let theme = 'auto';
+try { theme = THEMES.includes(localStorage.getItem('theme')) ? localStorage.getItem('theme') : 'auto'; } catch (e) { /* storage blocked */ }
+function applyTheme(t) {
+  theme = t;
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme'); else document.documentElement.setAttribute('data-theme', t);
+  $('#themeBtn').textContent = THEME_LABEL[t];
+  try { localStorage.setItem('theme', t); } catch (e) { /* storage blocked */ }
+}
+function rebuildCharts() { Object.values(charts).forEach(c => c.destroy()); charts = {}; init(); render(); }
+$('#themeBtn').addEventListener('click', () => { applyTheme(THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]); rebuildCharts(); });
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (theme === 'auto') rebuildCharts(); });
+applyTheme(theme);
+
+// ---- range selection on the latency chart
+let viewRange = null;
+function updateRangeLabels() {
+  if (!viewRange) return;
+  const winBtn = document.querySelector('#win button.on');
+  const text = (zoom ? 'Zoomed' : day ? dayLabel(day) : winSec ? `Last ${winBtn ? winBtn.textContent : ''}` : 'All data') + ` · ${fmtTS(viewRange.a)} – ${fmtTS(viewRange.b)}`
+    + (sel && !zoom ? ` · selected ${fmtTS(sel.a)} – ${fmtTS(sel.b)}` : '');
+  document.querySelectorAll('.rangeline').forEach(el => { el.textContent = text; });
+}
+const drawBands = () => ['lat', 'sig', 'snr'].forEach(k => charts[k] && charts[k].draw());
+const ownText = o => `ch ${o[0]} · ${o[1]} GHz` + (o[2] && o[2] !== '?' ? ` · ${o[2]} MHz` : '');
+const clearRange = () => { sel = null; zoom = null; render(); };
+function renderSel() {
+  const box = $('#selpanel'), r = zoom || sel;
+  updateRangeLabels();
+  if (!r) { box.hidden = true; box.innerHTML = ''; drawBands(); return; }
+  box.hidden = false;
+  const rs = all.filter(d => d.x >= r.a && d.x <= r.b);
+  const buttons = zoom ? '<button class="go" data-act="reset">Reset zoom</button>' : '<button class="go" data-act="zoom">Zoom all charts to this range</button><button data-act="clear">Clear</button>';
+  const head = `<div class="selhead"><b>${zoom ? 'Zoomed' : 'Selected'}: ${fmtTS(r.a)} – ${fmtTS(r.b)} (${fmtDur((r.b - r.a) / 1000)})</b>${buttons}</div>`;
+  if (!rs.length) { box.innerHTML = head + '<div class="hintline">No samples in this range.</div>'; return; }
+  const gw = rs.filter(d => d.gw != null).map(d => d.gw), net = rs.filter(d => d.net != null).map(d => d.net);
+  const loss = k => (100 * rs.filter(d => d[k]).length / rs.length).toFixed(1) + '%';
+  const avg = k => { const v = rs.map(d => d[k]).filter(v => v != null); return v.length ? Math.round(v.reduce((x, y) => x + y, 0) / v.length * 10) / 10 : null; };
+  const mx = a => a.length ? f1(Math.max(...a)) : '–';
+  const marks = buildMarkers(rs).filter(m => m.x >= r.a && m.x <= r.b);
+  const scanN = marks.filter(m => m.type === 'scans').length, changes = marks.filter(m => m.type === 'changes').length;
+  const outMin = marks.filter(m => m.kind === 'outage').reduce((t, m) => t + (m.x1 - m.x) / 60000, 0);
+  const mini = (k, v, sub = '') => `<div class="tile"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${sub}</div></div>`;
+  const evs = marks.filter(m => m.type !== 'scans').sort((a, b) => a.x - b.x);
+  const esc = t => String(t).replace(/&/g, '&amp;').replace(/</g, '&lt;');
+  const eps = analyzeSpikes(rs, marks);
+  const rowsHtml = eps.slice(0, 10).map(e => `<tr><td>${fmtTS(e.start)}</td><td>${e.peakGw ? f1(e.peakGw) + ' ms' : '–'}</td><td>${e.peakNet ? f1(e.peakNet) + ' ms' : '–'}</td><td>${e.lost || ''}</td><td class="l">${e.cause}${e.note ? `<br><span style="color:var(--muted)">after your note: ${esc(e.note)}</span>` : ''}</td></tr>`).join('');
+  box.innerHTML = head + `<div class="selgrid">`
+    + mini('Samples', rs.length, `${scanN} scan${scanN === 1 ? '' : 's'} in range`)
+    + mini('Router', `${f1(pct(gw, .5))} ms`, `p95 ${f1(pct(gw, .95))} · max ${mx(gw)} · loss ${loss('gwLost')}`)
+    + mini('Internet', `${f1(pct(net, .5))} ms`, `p95 ${f1(pct(net, .95))} · max ${mx(net)} · loss ${loss('netLost')}`)
+    + mini('Signal / SNR', `${avg('rssi') == null ? 'n/a' : avg('rssi') + ' dBm'}`, avg('snr') == null ? '' : `SNR ${avg('snr')} dB (averages)`)
+    + mini('Changes', changes, `channel or band · outage ${f1(outMin)} min`)
+    + `</div>`
+    + (evs.length ? `<ul class="selev">${evs.slice(0, 8).map(m => `<li><span class="hintline">${fmtTS(m.x)}</span><span>${esc(m.text)}</span></li>`).join('')}${evs.length > 8 ? `<li class="hintline">…and ${evs.length - 8} more</li>` : ''}</ul>` : '')
+    + (eps.length ? `<div class="tablewrap"><table class="days spikes"><thead><tr><th>Started</th><th>Worst router</th><th>Worst internet</th><th>Lost</th><th class="l">Likely cause</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>${eps.length > 10 ? `<div class="hintline">Showing 10 of ${eps.length} episodes.</div>` : ''}`
+                  : '<div class="hintline" style="color:var(--good)">No slow or lost-ping episodes in this range.</div>');
+  drawBands();
+}
+$('#selpanel').addEventListener('click', e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  if (b.dataset.act === 'zoom' && sel) { zoom = { a: sel.a, b: sel.b }; render(); }
+  else if (b.dataset.act === 'reset') clearRange();
+  else if (b.dataset.act === 'clear') { sel = null; renderSel(); }
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && (sel || zoom) && expMenu.style.display !== 'block') clearRange(); });
+for (const [cvId, key, topStrip] of [['#cLat', 'lat', 14], ['#cSig', 'sig', 0], ['#cSnr', 'snr', 0]]) {
+  const cv = $(cvId); let drag = null;
+  const geom = e => { const r = cv.getBoundingClientRect(); return { mx: e.clientX - r.left, my: e.clientY - r.top, a: charts[key].chartArea }; };
+  const t = px => Math.round(charts[key].scales.x.getValueForPixel(px));
+  cv.addEventListener('pointerdown', e => {
+    if (e.button !== 0 || !charts[key]) return;
+    const { mx, my, a } = geom(e);
+    if (mx < a.left || mx > a.right || my < a.top + topStrip || my > a.bottom) return;  // on the latency chart the top strip belongs to the event dots
+    drag = { x0: mx, x1: mx };
+    cv.setPointerCapture(e.pointerId); e.preventDefault();
+  });
+  cv.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const { mx, a } = geom(e);
+    drag.x1 = Math.max(a.left, Math.min(a.right, mx));
+    charts[key].$drag = { a: t(Math.min(drag.x0, drag.x1)), b: t(Math.max(drag.x0, drag.x1)) };
+    charts[key].draw();
+  });
+  const finish = () => {
+    if (!drag) return;
+    const d = drag; drag = null; charts[key].$drag = null;
+    if (Math.abs(d.x1 - d.x0) >= 8) sel = { a: t(Math.min(d.x0, d.x1)), b: t(Math.max(d.x0, d.x1)) };
+    else if (!zoom) sel = null;
+    renderSel();
+  };
+  cv.addEventListener('pointerup', finish); cv.addEventListener('pointercancel', finish);
+}
+
+$('#mkchips').innerHTML = Object.keys(MARKER_NAMES).map(k => `<button type="button" data-mk="${k}" title="Show or hide ${MARKER_NAMES[k].toLowerCase()} on the latency chart"><span class="sw" style="background:var(--${{ notes: 'c1', changes: 'c2', outages: 'bad', scans: 'muted' }[k]})"></span>${MARKER_NAMES[k]}</button>`).join('');
+$('#mkchips').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  markerVis[b.dataset.mk] = !markerVis[b.dataset.mk]; b.classList.toggle('off', !markerVis[b.dataset.mk]);
+  charts.lat.update('none');
+});
+{
+  const cv = $('#cLat');
+  const markerAt = e => {
+    const ch = charts.lat; if (!ch || !ch.$hit) return null;
+    const r = cv.getBoundingClientRect(), mx = e.clientX - r.left, my = e.clientY - r.top, a = ch.chartArea;
+    if (my < a.top || my > a.top + 14) return null;
+    const hits = ch.$hit.filter(h => mx >= h.x0 && mx <= h.x1 && h.m.type !== 'scans' || (h.m.type === 'scans' && Math.abs(mx - (h.x0 + 6)) <= 4 && my <= a.top + 10));
+    return hits.length ? hits[hits.length - 1].m : null;
+  };
+  cv.addEventListener('mousemove', e => {
+    const m = markerAt(e);
+    charts.lat.$markerHover = !!m;
+    cv.style.cursor = m ? 'help' : '';
+    if (!m) { if (!tipOwner) tipEl.style.display = 'none'; return; }
+    tipEl.textContent = `${fmtTS(m.x)} — ${m.text}`; tipEl.style.display = 'block';
+    tipEl.style.left = Math.max(8, Math.min(e.clientX + 12, innerWidth - tipEl.offsetWidth - 8)) + 'px';
+    tipEl.style.top = Math.min(e.clientY + 16, innerHeight - tipEl.offsetHeight - 8) + 'px';
+  });
+  cv.addEventListener('mouseleave', () => { charts.lat.$markerHover = false; cv.style.cursor = ''; if (!tipOwner) tipEl.style.display = 'none'; });
+}
+
+// ---- export: CSV, Excel (.xlsx), JSON and PNG for every card, limited to the current range
+function rangeBounds() {
+  const now = Date.now();
+  if (zoom) return { a: zoom.a, b: zoom.b, label: 'zoomed range' };
+  if (sel) return { a: sel.a, b: sel.b, label: 'selected range' };
+  if (day) { const d0 = new Date(day + 'T00:00:00').getTime(); return { a: d0, b: d0 + 86400000, label: `day ${day}` }; }
+  const btn = document.querySelector('#win button.on');
+  return { a: winSec ? now - winSec * 1000 : 0, b: now, label: winSec ? `last ${btn ? btn.textContent : ''}` : 'all loaded data' };
+}
+const inR = (x, r) => x >= r.a && x <= r.b;
+const EXPORTS = {
+  latency: r => ({ cols: ['time', 'router_ms', 'internet_ms', 'router_lost', 'internet_lost'], rows: all.filter(d => inR(d.x, r)).map(d => [d.t, d.gw, d.net, d.gwLost ? 1 : 0, d.netLost ? 1 : 0]) }),
+  signal: r => ({ cols: ['time', 'rssi_dbm', 'noise_dbm'], rows: all.filter(d => inR(d.x, r) && d.rssi != null).map(d => [d.t, d.rssi, d.noise]) }),
+  snrchart: r => ({ cols: ['time', 'snr_db', 'rssi_dbm', 'noise_dbm'], rows: all.filter(d => inR(d.x, r) && d.rssi != null).map(d => [d.t, d.snr, d.rssi, d.noise]) }),
+  txchart: r => ({ cols: ['time', 'tx_mbps', 'channel', 'band_ghz', 'width_mhz', 'standard'], rows: all.filter(d => inR(d.x, r) && d.rssi != null).map(d => [d.t, d.tx, d.ch, d.band, d.width, d.phy]) }),
+  sharing: r => ({ cols: ['time', 'your_channel', 'your_band_ghz', 'your_width_mhz', 'networks_sharing_channel', 'strong_networks', 'all_networks_seen'],
+    rows: scans.filter(d => inR(d.x, r)).map(d => [d.t, d.own && d.own[0], d.own && d.own[1], d.own && d.own[2] !== '?' ? d.own[2] : null, d.overlap, d.strong, d.total]) }),
+  bychannel: r => ({ cols: ['time', 'band_ghz', 'channel', 'networks'],
+    rows: scans.filter(d => inR(d.x, r)).flatMap(d => Object.entries(d.counts).map(([k, n]) => { const [b, c] = k.split(':'); return [d.t, b, +c, n]; })) }),
+  leastcrowded: r => {
+    const agg = {}; let n = 0;
+    for (const d of scans.filter(d => inR(d.x, r) && d.blocks)) { n++; for (const b of d.blocks) { const a = agg[b.k] || (agg[b.k] = { dfs: b.dfs, total: 0, strong: 0 }); a.total += b.total; a.strong += b.strong; } }
+    return { cols: ['channel_block', 'dfs', 'avg_strong_networks', 'avg_all_networks', 'scans_used'],
+      rows: Object.entries(agg).map(([k, a]) => [k, a.dfs ? 1 : 0, +(a.strong / n).toFixed(2), +(a.total / n).toFixed(2), n]) };
+  },
+  events: r => {
+    const rs = all.filter(d => inR(d.x, r));
+    return { cols: ['time', 'end_time', 'type', 'description'],
+      rows: buildMarkers(rs).filter(m => m.type !== 'scans' && inR(m.x, r)).sort((a, b) => a.x - b.x)
+        .map(m => [new Date(m.x - new Date(m.x).getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace('T', ' '),
+                   m.x1 != null ? new Date(m.x1 - new Date(m.x1).getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace('T', ' ') : null,
+                   m.type === 'outages' ? (m.kind === 'gap' ? 'gap' : 'outage') : m.type === 'changes' ? 'channel_change' : 'note', m.text]) };
+  },
+  daily: () => ({ cols: ['day', 'samples', 'router_loss_pct', 'internet_loss_pct', 'router_p95_ms', 'internet_p95_ms', 'internet_median_ms', 'outage_min', 'band_channel_changes', 'avg_rssi_dbm', 'avg_snr_db', 'notes'],
+    rows: days.map(d => [d.day, d.samples, d.gwLoss, d.netLoss, d.gwP95, d.netP95, d.netMedian, d.outageMin, d.changes, d.rssi, d.snr, d.notes.join(' | ')]) }),
+};
+const EXPORT_CHART = { latency: 'lat', signal: 'sig', snrchart: 'snr', txchart: 'tx', sharing: 'crowd', bychannel: 'ch', leastcrowded: 'blocks' };
+const EXPORT_NAME = { latency: 'latency', signal: 'signal', snrchart: 'snr', txchart: 'tx-rate', sharing: 'channel-sharing', bychannel: 'channels-nearby', leastcrowded: 'least-crowded', events: 'events', daily: 'daily-summary' };
+
+function download(blob, name) {
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 3000);
+}
+const csvCell = v => v == null ? '' : /[",\r\n]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v);
+const toCsv = t => '﻿' + [t.cols, ...t.rows].map(r => r.map(csvCell).join(',')).join('\r\n') + '\r\n';
+
+// Minimal .xlsx writer: a zip of a few XML parts, stored without compression. No library needed.
+const CRC_T = (() => { const t = new Uint32Array(256); for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc32 = b => { let c = 0xFFFFFFFF; for (let i = 0; i < b.length; i++) c = CRC_T[(c ^ b[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; };
+function makeZip(files) {
+  const enc = new TextEncoder(), u16 = v => [v & 255, (v >> 8) & 255], u32 = v => [v & 255, (v >> 8) & 255, (v >> 16) & 255, (v >>> 24) & 255];
+  const out = [], central = []; let off = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), data = enc.encode(f.text), crc = crc32(data);
+    const common = [...u16(20), ...u16(0x0800), ...u16(0), ...u16(0), ...u16(0x21), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0)];
+    out.push(new Uint8Array([0x50, 0x4b, 3, 4, ...common]), name, data);
+    central.push(new Uint8Array([0x50, 0x4b, 1, 2, ...u16(20), ...common, ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(off)]), name);
+    off += 30 + name.length + data.length;
+  }
+  const cdSize = central.reduce((n, p) => n + p.length, 0);
+  const end = new Uint8Array([0x50, 0x4b, 5, 6, 0, 0, 0, 0, ...u16(files.length), ...u16(files.length), ...u32(cdSize), ...u32(off), 0, 0]);
+  return new Blob([...out, ...central, end], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+const xmlEsc = v => String(v).replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f]/g, '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const colName = i => { let n = '', k = i + 1; while (k > 0) { n = String.fromCharCode(65 + (k - 1) % 26) + n; k = Math.floor((k - 1) / 26); } return n; };
+function toXlsx(t) {
+  const cell = (v, r, c, head) => v == null || v === '' ? '' : (typeof v === 'number' && isFinite(v)
+    ? `<c r="${colName(c)}${r}"><v>${v}</v></c>`
+    : `<c r="${colName(c)}${r}" t="inlineStr"${head ? ' s="1"' : ''}><is><t xml:space="preserve">${xmlEsc(v)}</t></is></c>`);
+  const rowXml = (arr, r, head) => `<row r="${r}">${arr.map((v, c) => cell(v, r, c, head)).join('')}</row>`;
+  const sheet = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><cols><col min="1" max="1" width="22" customWidth="1"/><col min="2" max="${Math.max(2, t.cols.length)}" width="18" customWidth="1"/></cols><sheetData>${rowXml(t.cols, 1, true)}${t.rows.map((r, i) => rowXml(r, i + 2, false)).join('')}</sheetData></worksheet>`;
+  const NS = 'http://schemas.openxmlformats.org/', R = NS + 'officeDocument/2006/relationships';
+  return makeZip([
+    { name: '[Content_Types].xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="${NS}package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>` },
+    { name: '_rels/.rels', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${NS}package/2006/relationships"><Relationship Id="rId1" Type="${R}/officeDocument" Target="xl/workbook.xml"/></Relationships>` },
+    { name: 'xl/workbook.xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="${NS}spreadsheetml/2006/main" xmlns:r="${R}"><sheets><sheet name="Data" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+    { name: 'xl/_rels/workbook.xml.rels', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="${NS}package/2006/relationships"><Relationship Id="rId1" Type="${R}/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="${R}/styles" Target="styles.xml"/></Relationships>` },
+    { name: 'xl/styles.xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="${NS}spreadsheetml/2006/main"><fonts count="2"><font><sz val="11"/><name val="Calibri"/></font><font><b/><sz val="11"/><name val="Calibri"/></font></fonts><fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>` },
+    { name: 'xl/worksheets/sheet1.xml', text: sheet },
+  ]);
+}
+
+function exportName(key, r, ext) {
+  const z = n => String(n).padStart(2, '0'), f = ms => { const d = new Date(ms); return `${d.getFullYear()}${z(d.getMonth() + 1)}${z(d.getDate())}-${z(d.getHours())}${z(d.getMinutes())}`; };
+  const a = r.a || (all[0] ? all[0].x : Date.now());
+  return key === 'daily' ? `wifi-daily-summary.${ext}` : `wifi-${EXPORT_NAME[key]}_${f(a)}_${f(Math.min(r.b, Date.now()))}.${ext}`;
+}
+function doExport(key, fmt) {
+  const r = key === 'daily' ? { a: 0, b: Infinity, label: 'all days' } : rangeBounds();
+  if (fmt === 'png') {
+    const c = charts[EXPORT_CHART[key]].canvas, o = document.createElement('canvas'); o.width = c.width; o.height = c.height;
+    const x = o.getContext('2d'); x.fillStyle = css('--card'); x.fillRect(0, 0, o.width, o.height); x.drawImage(c, 0, 0);
+    return o.toBlob(b => download(b, exportName(key, r, 'png')));
+  }
+  const t = EXPORTS[key](r);
+  if (fmt === 'csv') download(new Blob([toCsv(t)], { type: 'text/csv;charset=utf-8' }), exportName(key, r, 'csv'));
+  else if (fmt === 'xlsx') download(toXlsx(t), exportName(key, r, 'xlsx'));
+  else if (fmt === 'json') {
+    const iso = ms => isFinite(ms) && ms ? new Date(ms).toISOString() : null;
+    download(new Blob([JSON.stringify({ source: 'WiFiMonitor', card: EXPORT_NAME[key], range: { label: r.label, from: iso(r.a), to: iso(Math.min(r.b, Date.now())) }, count: t.rows.length,
+      data: t.rows.map(row => Object.fromEntries(t.cols.map((c, i) => [c, row[i]]))) }, null, 2)], { type: 'application/json' }), exportName(key, r, 'json'));
+  }
+}
+const expMenu = document.createElement('div'); expMenu.id = 'expmenu'; document.body.appendChild(expMenu);
+let expOpener = null;
+function closeExp() { expMenu.style.display = 'none'; if (expOpener) expOpener.setAttribute('aria-expanded', 'false'); expOpener = null; }
+function openExp(btn) {
+  const key = btn.dataset.exp, r = key === 'daily' ? { a: 0, b: Infinity, label: 'all days' } : rangeBounds(), n = EXPORTS[key](r).rows.length;
+  expOpener = btn; btn.setAttribute('aria-expanded', 'true');
+  expMenu.dataset.key = key;
+  expMenu.innerHTML = `<div class="range">Exports: <b>${r.label}</b> · ${n} row${n === 1 ? '' : 's'}</div>`
+    + `<button data-fmt="csv">CSV <span>.csv</span></button><button data-fmt="xlsx">Excel <span>.xlsx</span></button><button data-fmt="json">JSON <span>.json</span></button>`
+    + (EXPORT_CHART[key] ? `<button data-fmt="png">Image <span>.png</span></button>` : '');
+  expMenu.style.display = 'block';
+  const b = btn.getBoundingClientRect(), w = expMenu.offsetWidth, h = expMenu.offsetHeight;
+  expMenu.style.left = Math.max(8, Math.min(b.right - w, innerWidth - w - 8)) + 'px';
+  expMenu.style.top = (b.bottom + 6 + h > innerHeight - 8 ? Math.max(8, b.top - h - 6) : b.bottom + 6) + 'px';
+}
+document.addEventListener('click', e => {
+  const btn = e.target.closest('.expbtn'), item = e.target.closest('#expmenu button[data-fmt]');
+  if (item) { doExport(expMenu.dataset.key, item.dataset.fmt); closeExp(); }
+  else if (btn) { if (expOpener === btn) closeExp(); else { closeExp(); openExp(btn); } }
+  else if (!e.target.closest('#expmenu')) closeExp();
+});
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeExp(); });
+window.addEventListener('scroll', closeExp, true);
+
+document.querySelectorAll('.card h2 .hint').forEach(h => {
+  const key = h.dataset.tipKey, card = h.closest('.card');
+  if (FIX[key] && card) card.insertAdjacentHTML('beforeend', fixBlock(key));
+  if (EXPORTS[key] && card) card.insertAdjacentHTML('afterbegin', `<button class="expbtn" type="button" data-exp="${key}" aria-haspopup="menu" aria-expanded="false" aria-label="Export data" title="Export this data as CSV, Excel, JSON or image (follows the selected range)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg></button>`);
+});
+
+init(); load(); loadDays(); setInterval(() => { if (!isPast() && !zoom) load(); }, 5000);
+</script>
+</body>
+</html>
