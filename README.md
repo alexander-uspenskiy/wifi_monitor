@@ -70,37 +70,56 @@ The `service` commands also run as a normal user and need no administrator right
 
 **Fastest way: let an AI coding assistant set it up.** Open this folder in [Claude Code](https://claude.com/claude-code), Codex or a similar agent and ask it:
 
-> Read the README, install anything that is missing, start WiFiMonitor and open the dashboard.
+> Read AGENTS.md and the README, install anything that is missing, start WiFiMonitor and open the dashboard.
 
-It can check Python and the Xcode Command Line Tools, build the macOS helper, start the collector and dashboard, and fix problems such as a busy port, so you skip the manual steps below. The agent runs commands on your computer, so review what it asks to do. This is optional: everything below works without any AI service.
+[AGENTS.md](AGENTS.md) tells the agent exactly what to do, without asking you which mode to use: it checks Python and the Xcode Command Line Tools, runs `./start.sh --service` (background, no window), verifies the dashboard answers, fixes problems such as a busy port, and tells you the address and how to stop it. It uses the login-start option only if you ask for it. The agent runs commands on your computer, so review what it asks to do. This is optional: everything below works without any AI service.
 
-Or do it yourself. There are two ways to run WiFiMonitor, and you can use either one:
-
-| | Foreground | Background service |
-|---|---|---|
-| Command | `./start.sh` or `start.bat` | `./service.sh start` or `service.bat start` |
-| Terminal window | Stays open while it runs | None |
-| Stop | Ctrl-C (macOS), or close the collector window (Windows) | `stop` command, or the **Stop** button on the dashboard |
-| Start at login | No | Optional, with `install` |
-| Best for | Trying it out, a quick session | Long monitoring, leaving it running |
-
-### Option 1: foreground
-
-macOS:
+Or do it yourself. Run the start script:
 
 ```bash
-./start.sh
+./start.sh        # macOS
 ```
 
-Windows:
-
 ```bat
-start.bat
+start.bat         :: Windows
+```
+
+In an interactive terminal it asks how to run WiFiMonitor:
+
+```
+How do you want to run WiFiMonitor?
+  1) In this terminal window   (stop with Ctrl-C)                          [default]
+  2) As a background service   (no window; stop from the dashboard or ./service.sh stop)
+  3) As a background service, and start it at every login
 ```
 
 Then open <http://127.0.0.1:8765>.
 
-The start scripts launch the collector and the dashboard together. On macOS, Ctrl-C stops both. On Windows the collector opens in its own window, so close that window to stop it.
+To skip the question, pass a flag:
+
+| Flag | What it does |
+|---|---|
+| `--terminal` | Run in this window (the foreground option below) |
+| `--service` | Start the background service now |
+| `--login` | Start the background service now and at every login |
+
+Other arguments go to the collector, for example `./start.sh --service --interval 10 --scan-every 600`. The environment variable `WIFI_MODE=terminal`, `service` or `login` does the same as the flags. When there is no flag, no `WIFI_MODE` and no interactive terminal (an AI agent or a script), it never asks and starts the background service, because a foreground run would block the caller.
+
+There are two ways to run WiFiMonitor. Run only one at a time, since both use port 8765.
+
+| | Foreground | Background service |
+|---|---|---|
+| Start | `./start.sh --terminal` | `./start.sh --service` or `./service.sh start` |
+| Terminal window | Stays open while it runs | None |
+| Stop | Ctrl-C | `./service.sh stop`, or the **Stop** button on the dashboard |
+| Start at login | No | Optional, with `--login` or `install` |
+| Best for | Trying it out, a quick session | Long monitoring, leaving it running |
+
+On Windows use `start.bat` and `service.bat` in place of `./start.sh` and `./service.sh`.
+
+### Option 1: foreground
+
+`./start.sh --terminal` (or `start.bat --terminal`) runs the collector and the dashboard in this window. You see each sample as it is logged, and Ctrl-C stops both.
 
 To run them separately:
 
@@ -109,11 +128,9 @@ python3 src/collector.py        # python src\collector.py on Windows
 python3 src/dashboard_server.py
 ```
 
-Extra arguments are passed to the collector: `./start.sh --interval 10 --scan-every 600`.
-
 ### Option 2: background service
 
-To keep monitoring without a terminal window, run it as a background service. It works the same on macOS and Windows, needs no administrator rights, and you can stop it whenever you like. Run only one of the two options at a time, since both use port 8765.
+To keep monitoring without a terminal window, run it as a background service. It works the same on macOS and Windows, needs no administrator rights, and you can stop it whenever you like.
 
 macOS (`./service.sh`) and Windows (`service.bat`) take the same commands:
 
@@ -134,12 +151,16 @@ macOS (`./service.sh`) and Windows (`service.bat`) take the same commands:
 ```
 
 - **Stop from the dashboard:** when the dashboard is served by the background service, a **Stop** button appears in the header. It stops the collector and the dashboard after you confirm. Starting again cannot be done from the page, because the page stops with the service. Use `start` (or `open`), or `install` to start at login. In foreground mode there is no Stop button, so use Ctrl-C.
-- `stop` ends it for now. If you used `install`, it starts again at your next login until you run `uninstall`.
+- `stop` ends it for now. If you used `install` or `--login`, it starts again at your next login until you uninstall it.
 - Extra arguments go to the collector, for example `./service.sh install --interval 10 --scan-every 600`. `install` remembers them for the login start. Environment variables such as `PORT` are not remembered.
 - A supervisor restarts the collector or the dashboard if either one crashes. Its own messages go to `logs/service.log`, which is rotated and stays under about 1.5 MB.
 - It collects only while the computer is awake.
-- macOS: `install` adds a login item (a LaunchAgent in `~/Library/LaunchAgents`), so macOS may show a "Background Items Added" notice. `uninstall` removes it.
+- macOS: `install` adds a login item (a LaunchAgent in `~/Library/LaunchAgents`), so macOS may show a "Background Items Added" notice.
 - Windows: `install` adds `WiFiMonitor.vbs` to your Startup folder and uses `pythonw`, so no window appears. This has not been tested on a real Windows machine.
+
+### Uninstall
+
+Run `./uninstall.sh` (macOS) or `uninstall.bat` (Windows). It stops the background service and its web server, and removes the login item. Your logs and the project folder are kept, so delete the folder yourself if you want everything gone. If the dashboard is still answering afterwards, it was started in a terminal with `--terminal`, and the script tells you to press Ctrl-C in that window. It is the same as `./service.sh uninstall`.
 
 ## Configuration
 
@@ -172,7 +193,7 @@ Scans make the radio briefly leave its channel and can cause a slow or lost ping
 - **Select a range:** drag across the latency chart, the signal and noise chart, or the SNR chart to select a time range. The selection is shared, so the band appears on all three. The signal and noise and SNR charts also show the time range they cover under their titles, including the selected range. A panel shows router and internet latency and loss, signal, SNR, channel changes, the events inside the range and the likely-cause table for just that range. "Zoom all charts to this range" stretches every chart and tile to the selection and pauses live refresh. "Reset zoom" or the Escape key returns to normal.
 - **Export:** every chart and table has a download icon (a tray with a downward arrow) in its top right corner. It downloads that card's data as **CSV**, **Excel (.xlsx)** or **JSON**, and charts can also be saved as a **PNG image**. The menu shows exactly what will be exported. The range follows what you are looking at: the zoomed range if you zoomed, otherwise the dragged selection, otherwise the selected day or time window (15m, 1h, 3h, All). The Daily summary always exports all days. File names include the time range, for example `wifi-latency_20261009-1229_20261009-1251.csv`. JSON files also carry the range and row count. The Excel files are written by the page itself, so nothing extra is installed or downloaded.
 - **Chart range:** the charts follow the 15m, 1h, 3h or All window. When the logs hold less data than the window, for example on a first run, the time axis starts at your first sample so the data fills the chart instead of leaving it mostly empty.
-- **Stop button:** when the dashboard is served by the background service (see [Option 2](#option-2-background-service)), a **Stop** button with an (i) help icon appears in the header. It ends the collector and the dashboard. It does not appear when you started with `start.sh` or `start.bat`.
+- **Stop button:** when the dashboard is served by the background service (see [Option 2](#option-2-background-service)), a **Stop** button with an (i) help icon appears in the header. It ends the collector and the dashboard. It does not appear when you started with `--terminal`.
 - **Scanning switch:** the "Scanning on" switch in the header pauses and resumes nearby-network scans without stopping the collector. Use it before an important call, because a scan briefly leaves your channel and can cost a lost ping. After you resume, the next scan waits a full interval. Each change is logged as a note, so pauses show up in the Events list. The setting is kept in `logs/control.json`, which the collector re-reads every sample.
 - **Theme:** the button in the header cycles Auto (follows your system), Light and Dark. Your choice is remembered in the browser.
 - **Viewing older days:** the dropdown at the top (default "Live") lists every day that has a log file. Pick one to see that whole day. Live refresh pauses for past days, and the 15m, 1h, 3h and All buttons return you to live view.
@@ -219,10 +240,13 @@ Scan lines are a timestamp followed by JSON: `{"own":[36,"5","80"],"nets":[[chan
 
 ```
 README.md
-start.sh, start.bat       launch the collector and the dashboard in the foreground
-service.sh, service.bat   run it as a background service (start, stop, status, install)
+start.sh, start.bat       start WiFiMonitor: asks, or takes --terminal / --service / --login
+service.sh, service.bat   control the background service (start, stop, status, install)
+uninstall.sh, .bat        stop the service and web server, remove the login item
+AGENTS.md                 setup instructions for AI coding agents
 src/
   collector.py            sampling and scanning (macOS and Windows)
+  launch.py               what start.sh and start.bat run: mode choice, flags, foreground run
   service.py              background service: supervisor, start/stop/status, start at login
   dashboard_server.py     local web server and JSON API
   dashboard.html          the dashboard page
@@ -249,7 +273,7 @@ The server only listens on `127.0.0.1`. It only accepts notes, the scanning swit
 - **"swiftc not found" on macOS:** run `xcode-select --install`, then start again. Until then only pings are logged.
 - **Dashboard says "No recent data":** the collector is not running, or the computer was asleep. Keep the machine awake while monitoring (`caffeinate` on macOS).
 - **Charts are blank:** check the browser can reach `cdnjs.cloudflare.com`.
-- **Port already in use:** start with another port, for example `PORT=8800 python3 src/dashboard_server.py`. If you see this after starting with `start.sh`, the background service may already be running: check with `./service.sh status` and stop it first.
+- **Port already in use:** start with another port, for example `PORT=8800 python3 src/dashboard_server.py`. If `start.sh --terminal` says the background service is already running, stop it with `./service.sh stop` or just open the dashboard.
 - **Service port:** `PORT=8800 ./service.sh start` runs the service on that port. Use the same `PORT` for `status`, and note that the login start from `install` always uses the default 8765.
 - **Dashboard is not reachable after `service.sh start`:** it prints where to look. Read `logs/service.log`, which shows the output of both processes and any restarts.
 - **The Stop button is missing:** the page was not started by the service. Stop it with Ctrl-C in its window, or use the `service` commands to run it in the background.

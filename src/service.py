@@ -7,7 +7,7 @@
     service.py status      running or not, and whether the dashboard answers
     service.py open        start if needed, then open the dashboard in the browser
     service.py install     start now and at every login
-    service.py uninstall   stop, and do not start at login any more
+    service.py uninstall   stop, remove the login item (also available as uninstall.sh / uninstall.bat)
 
 Extra arguments go to the collector, e.g. `service.py start --interval 10 --scan-every 600`.
 `install` stores them for the login start. Standard library only, no admin rights needed.
@@ -248,11 +248,19 @@ def install(extra):
 
 
 def uninstall():
+    """Stop the service and remove the login item. Logs and the project folder are left alone."""
     stop()
-    for path in (PLIST, STARTUP_VBS):
-        if path and os.path.exists(path):
-            os.remove(path)
-            print("removed %s" % path)
+    path = PLIST if IS_MAC else STARTUP_VBS if IS_WIN else None
+    if path and os.path.exists(path):
+        os.remove(path)
+        print("removed the login item %s" % path)
+    else:
+        print("no login item was installed")
+    if dashboard_up():
+        print("A dashboard is still answering on %s. It was probably started in a terminal with start.sh or start.bat --terminal: "
+              "press Ctrl-C in that window to stop it." % URL)
+        return 1
+    print("WiFiMonitor is uninstalled and nothing is running. Your logs in %s are kept." % logstore.LOG_DIR)
     return 0
 
 
