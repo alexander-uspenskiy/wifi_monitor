@@ -159,7 +159,7 @@
       <button data-s="10800">3h</button>
       <button data-s="0">All</button>
     </div><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="window">i</span></span>
-    <span class="ctl" id="stopctl" hidden><button class="themebtn stopbtn" id="stopBtn" type="button" title="Stop the background service: monitoring and this page end until you start it again">■ Stop</button></span>
+    <span class="ctl" id="stopctl" hidden><button class="themebtn stopbtn" id="stopBtn" type="button" title="Stop the background service: monitoring and this page end until you start it again">■ Stop</button><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="stop">i</span></span>
     <span class="ctl"><button class="themebtn" id="themeBtn" type="button" title="Switch between automatic (follows your system), light and dark"></button><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="theme">i</span></span>
   </header>
 
@@ -202,6 +202,7 @@ const STALE_MS = 25000, GAP_MS = 30000, SCAN_GAP_MS = 45 * 60000;
 const TIPS = {
   status: "Health of the latest sample. Healthy: all good. Degraded: a lost ping, SNR under 20 dB, signal weaker than -72 dBm, or internet latency over 150 ms. Down: the router and internet are both unreachable, or Wi-Fi is disconnected. 'No recent data' means the collector is not running or the computer slept.",
   scan: "Pauses or resumes the nearby-network scans. A scan briefly leaves your channel and can cost a lost ping, so turn it off before important calls. Pings and signal keep being recorded either way.",
+  stop: "Stops the background service: the collector and this dashboard both end, and your logs are kept. This page cannot start it again. To start: run ./service.sh start (macOS) or service.bat start (Windows) from the project folder. Use ./service.sh open to start it and open this page, or install to start it automatically at every login (uninstall turns that off). The button only appears when the service started this page. If you started with start.sh or start.bat, press Ctrl-C in that window instead.",
   day: "Live shows a rolling window of recent data. Pick a day to see that whole day from the saved logs. Live refresh pauses for past days.",
   window: "How much recent history the charts and tiles cover in live view. Choosing one returns you from a past day to live view.",
   theme: "Cycles Auto (follows your system), Light and Dark. Remembered in this browser.",
