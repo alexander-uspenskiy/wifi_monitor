@@ -64,6 +64,14 @@ WiFiMonitor runs as a normal user. It needs no administrator rights, no `sudo`, 
 
 ## Quick start
 
+**Fastest way: let an AI coding assistant set it up.** Open this folder in [Claude Code](https://claude.com/claude-code), Codex or a similar agent and ask it:
+
+> Read the README, install anything that is missing, start WiFiMonitor and open the dashboard.
+
+It can check Python and the Xcode Command Line Tools, build the macOS helper, start the collector and dashboard, and fix problems such as a busy port, so you skip the manual steps below. The agent runs commands on your computer, so review what it asks to do. This is optional: everything below works without any AI service.
+
+Or do it yourself.
+
 macOS:
 
 ```bash
