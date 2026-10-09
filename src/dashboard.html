@@ -617,6 +617,8 @@ function render() {
   let rows = all.filter(d => d.x >= cutoff);
   let xmin = day ? d0 : (winSec ? cutoff : (rows[0] ? rows[0].x : now - 60000));
   let xmax = past ? d0 + 86400000 : now;
+  // live view with less data than the window (first run): fit the axis to the data that exists instead of leaving the chart mostly empty
+  if (!day && winSec && rows.length && rows[0].x > cutoff) xmin = Math.min(rows[0].x, now - 60000);
   if (zoom) { rows = rows.filter(d => d.x >= zoom.a && d.x <= zoom.b); xmin = zoom.a; xmax = zoom.b; }
   const last = zoom ? rows[rows.length - 1] : all[all.length - 1];
 
