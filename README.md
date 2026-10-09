@@ -192,3 +192,7 @@ The server only listens on `127.0.0.1` and only accepts notes posted from its ow
 - **Dashboard says "No recent data":** the collector is not running, or the computer was asleep. Keep the machine awake while monitoring (`caffeinate` on macOS).
 - **Charts are blank:** check the browser can reach `cdnjs.cloudflare.com`.
 - **Port already in use:** start with another port, for example `PORT=8800 python3 src/dashboard_server.py`.
+
+## License
+
+[MIT](LICENSE). You may use, modify and redistribute this tool, but you must keep the copyright notice (Alexander Uspensky) in copies and derived work.
