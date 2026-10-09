@@ -49,6 +49,10 @@ WiFiMonitor runs as a normal user. It needs no administrator rights, no `sudo`, 
 | Listening on `127.0.0.1:8765` | The dashboard. It is not reachable from other computers |
 | Browser access to `cdnjs.cloudflare.com` | Loading Chart.js for the charts |
 
+**Background service (optional)**
+
+The `service` commands also run as a normal user and need no administrator rights. `start` and `stop` only start and end WiFiMonitor's own processes. `install` writes one file that you own: a LaunchAgent in `~/Library/LaunchAgents` on macOS, or `WiFiMonitor.vbs` in your Startup folder on Windows. It runs only while you are logged in, and `uninstall` removes the file. Windows Services and Task Scheduler are not used because they usually need administrator rights. If your organisation disables Windows Script Host, the Windows login start will not run, but `start` and `stop` still work.
+
 **macOS**
 
 - **No special permission was needed on macOS 26.** Signal, noise, channel, rate and nearby-network scans all work without Location Services.
@@ -167,6 +171,8 @@ Scans make the radio briefly leave its channel and can cause a slow or lost ping
 - **Latency chart markers and causes:** dots at the top of the latency chart mark your notes, channel or band changes and outages (shaded), with small ticks for scans. Hover a dot for details. Under the chart, each slow or lost-ping episode is listed with a likely cause (a disconnect, a channel change, a scan by this tool, weak signal, Wi-Fi congestion, or something beyond your router). The causes are a heuristic based on what changed at the same moment.
 - **Select a range:** drag across the latency chart, the signal and noise chart, or the SNR chart to select a time range. The selection is shared, so the band appears on all three. The signal and noise and SNR charts also show the time range they cover under their titles, including the selected range. A panel shows router and internet latency and loss, signal, SNR, channel changes, the events inside the range and the likely-cause table for just that range. "Zoom all charts to this range" stretches every chart and tile to the selection and pauses live refresh. "Reset zoom" or the Escape key returns to normal.
 - **Export:** every chart and table has a download icon (a tray with a downward arrow) in its top right corner. It downloads that card's data as **CSV**, **Excel (.xlsx)** or **JSON**, and charts can also be saved as a **PNG image**. The menu shows exactly what will be exported. The range follows what you are looking at: the zoomed range if you zoomed, otherwise the dragged selection, otherwise the selected day or time window (15m, 1h, 3h, All). The Daily summary always exports all days. File names include the time range, for example `wifi-latency_20261009-1229_20261009-1251.csv`. JSON files also carry the range and row count. The Excel files are written by the page itself, so nothing extra is installed or downloaded.
+- **Chart range:** the charts follow the 15m, 1h, 3h or All window. When the logs hold less data than the window, for example on a first run, the time axis starts at your first sample so the data fills the chart instead of leaving it mostly empty.
+- **Stop button:** when the dashboard is served by the background service (see [Option 2](#option-2-background-service)), a **Stop** button with an (i) help icon appears in the header. It ends the collector and the dashboard. It does not appear when you started with `start.sh` or `start.bat`.
 - **Scanning switch:** the "Scanning on" switch in the header pauses and resumes nearby-network scans without stopping the collector. Use it before an important call, because a scan briefly leaves your channel and can cost a lost ping. After you resume, the next scan waits a full interval. Each change is logged as a note, so pauses show up in the Events list. The setting is kept in `logs/control.json`, which the collector re-reads every sample.
 - **Theme:** the button in the header cycles Auto (follows your system), Light and Dark. Your choice is remembered in the browser.
 - **Viewing older days:** the dropdown at the top (default "Live") lists every day that has a log file. Pick one to see that whole day. Live refresh pauses for past days, and the 15m, 1h, 3h and All buttons return you to live view.
@@ -185,6 +191,8 @@ logs/
   wifi-monitor-2026-10-09.log       samples and notes (today, plain text)
   wifi-monitor-2026-10-08.log.gz    previous days, compressed
   wifi-scan-2026-10-09.log          nearby-network scans
+  service.log                       background service output (rotated, about 1.5 MB at most)
+  service.pid                       process id of the running background service
 ```
 
 - A new file starts at midnight.
@@ -224,7 +232,7 @@ logs/                     log files (ignored by git)
 bin/                      built macOS helper (ignored by git)
 ```
 
-The server only listens on `127.0.0.1` and only accepts notes posted from its own page.
+The server only listens on `127.0.0.1`. It only accepts notes, the scanning switch and (in service mode) the Stop request when they are posted from its own page.
 
 ## Limitations
 
@@ -241,7 +249,10 @@ The server only listens on `127.0.0.1` and only accepts notes posted from its ow
 - **"swiftc not found" on macOS:** run `xcode-select --install`, then start again. Until then only pings are logged.
 - **Dashboard says "No recent data":** the collector is not running, or the computer was asleep. Keep the machine awake while monitoring (`caffeinate` on macOS).
 - **Charts are blank:** check the browser can reach `cdnjs.cloudflare.com`.
-- **Port already in use:** start with another port, for example `PORT=8800 python3 src/dashboard_server.py`.
+- **Port already in use:** start with another port, for example `PORT=8800 python3 src/dashboard_server.py`. If you see this after starting with `start.sh`, the background service may already be running: check with `./service.sh status` and stop it first.
+- **Service port:** `PORT=8800 ./service.sh start` runs the service on that port. Use the same `PORT` for `status`, and note that the login start from `install` always uses the default 8765.
+- **Dashboard is not reachable after `service.sh start`:** it prints where to look. Read `logs/service.log`, which shows the output of both processes and any restarts.
+- **The Stop button is missing:** the page was not started by the service. Stop it with Ctrl-C in its window, or use the `service` commands to run it in the background.
 
 ## License
 
