@@ -97,6 +97,35 @@ python3 src/dashboard_server.py
 
 Extra arguments are passed to the collector: `./start.sh --interval 10 --scan-every 600`.
 
+## Run in the background
+
+To keep monitoring without a terminal window, run it as a background service. It works the same on macOS and Windows, needs no administrator rights, and you can stop it whenever you like.
+
+macOS (`./service.sh`) and Windows (`service.bat`) take the same commands:
+
+| Command | What it does |
+|---|---|
+| `start` | Start the collector and dashboard in the background |
+| `stop` | Stop both. Your logs stay |
+| `restart` | Stop, then start |
+| `status` | Shows whether it is running, whether the dashboard answers, and whether it starts at login |
+| `open` | Start it if needed and open the dashboard in your browser |
+| `install` | Start now and start again at every login |
+| `uninstall` | Stop, and no longer start at login |
+
+```bash
+./service.sh start      # service.bat start on Windows
+./service.sh status
+./service.sh stop
+```
+
+- `stop` ends it for now. If you used `install`, it starts again at your next login until you run `uninstall`.
+- Extra arguments go to the collector, for example `./service.sh install --interval 10 --scan-every 600`. `install` remembers them for the login start. Environment variables such as `PORT` are not remembered.
+- A supervisor restarts the collector or the dashboard if either one crashes. Its own messages go to `logs/service.log`, which is rotated and stays under about 1.5 MB.
+- It collects only while the computer is awake.
+- macOS: `install` adds a login item (a LaunchAgent in `~/Library/LaunchAgents`), so macOS may show a "Background Items Added" notice. `uninstall` removes it.
+- Windows: `install` adds `WiFiMonitor.vbs` to your Startup folder and uses `pythonw`, so no window appears. This has not been tested on a real Windows machine.
+
 ## Configuration
 
 Command-line flags for the collector, with matching environment variables:
@@ -171,9 +200,11 @@ Scan lines are a timestamp followed by JSON: `{"own":[36,"5","80"],"nets":[[chan
 
 ```
 README.md
-start.sh, start.bat       launch the collector and the dashboard
+start.sh, start.bat       launch the collector and the dashboard in the foreground
+service.sh, service.bat   run it as a background service (start, stop, status, install)
 src/
   collector.py            sampling and scanning (macOS and Windows)
+  service.py              background service: supervisor, start/stop/status, start at login
   dashboard_server.py     local web server and JSON API
   dashboard.html          the dashboard page
   logstore.py             daily log files, rotation, compression, reading
