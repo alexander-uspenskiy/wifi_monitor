@@ -4,6 +4,8 @@ import datetime as dt
 import json
 import os
 import re
+import subprocess
+import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -226,6 +228,9 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(read_scans(day)).encode(), "application/json")
         elif path == "/api/control":
             self._send(200, json.dumps(logstore.read_control()).encode(), "application/json")
+        elif path == "/api/service":
+            # controllable only when the supervisor in service.py started this server
+            self._send(200, json.dumps({"controllable": bool(os.environ.get("WIFI_SERVICE"))}).encode(), "application/json")
         elif path == "/api/days":
             self._send(200, json.dumps(read_days()).encode(), "application/json")
         elif path in ("/", "/index.html"):
@@ -240,7 +245,7 @@ class Handler(BaseHTTPRequestHandler):
         host = self.headers.get("Host", "")
         same = origin is None or origin == f"http://{host}"
         path = self.path.split("?")[0]
-        if path not in ("/api/event", "/api/control") or not same or "application/json" not in self.headers.get("Content-Type", ""):
+        if path not in ("/api/event", "/api/control", "/api/service") or not same or "application/json" not in self.headers.get("Content-Type", ""):
             return self._send(403, b"forbidden", "text/plain")
         try:
             length = min(int(self.headers.get("Content-Length", "0")), 2000)
@@ -249,6 +254,15 @@ class Handler(BaseHTTPRequestHandler):
                 raise ValueError
         except ValueError:
             return self._send(400, b"bad request", "text/plain")
+        if path == "/api/service":
+            # stop the whole background service. Also checks Host, so a page reaching localhost through DNS rebinding cannot stop it.
+            if body.get("action") != "stop" or not os.environ.get("WIFI_SERVICE") or host not in (f"127.0.0.1:{PORT}", f"localhost:{PORT}"):
+                return self._send(403, b"forbidden", "text/plain")
+            self._send(200, json.dumps({"ok": True}).encode(), "application/json")
+            kwargs = {"creationflags": 0x00000008 | 0x00000200} if sys.platform.startswith("win") else {"start_new_session": True}
+            subprocess.Popen([sys.executable, os.path.join(DIR, "service.py"), "stop"], stdin=subprocess.DEVNULL,
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)  # detached: it ends this process too
+            return
         if path == "/api/control":
             paused = body.get("scan_paused")
             if not isinstance(paused, bool):

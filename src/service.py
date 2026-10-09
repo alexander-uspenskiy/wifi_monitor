@@ -108,7 +108,7 @@ def supervise(collector_args):
     log.addHandler(handler)
 
     py = background_python()
-    env = dict(os.environ, PYTHONUNBUFFERED="1")
+    env = dict(os.environ, PYTHONUNBUFFERED="1", WIFI_SERVICE="1")  # WIFI_SERVICE lets the dashboard offer a Stop button
     flags = 0x08000000 if IS_WIN else 0  # CREATE_NO_WINDOW
     jobs = {
         "collector": [py, os.path.join(SRC, "collector.py")] + collector_args,

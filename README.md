@@ -70,7 +70,17 @@ WiFiMonitor runs as a normal user. It needs no administrator rights, no `sudo`, 
 
 It can check Python and the Xcode Command Line Tools, build the macOS helper, start the collector and dashboard, and fix problems such as a busy port, so you skip the manual steps below. The agent runs commands on your computer, so review what it asks to do. This is optional: everything below works without any AI service.
 
-Or do it yourself.
+Or do it yourself. There are two ways to run WiFiMonitor, and you can use either one:
+
+| | Foreground | Background service |
+|---|---|---|
+| Command | `./start.sh` or `start.bat` | `./service.sh start` or `service.bat start` |
+| Terminal window | Stays open while it runs | None |
+| Stop | Ctrl-C (macOS), or close the collector window (Windows) | `stop` command, or the **Stop** button on the dashboard |
+| Start at login | No | Optional, with `install` |
+| Best for | Trying it out, a quick session | Long monitoring, leaving it running |
+
+### Option 1: foreground
 
 macOS:
 
@@ -97,9 +107,9 @@ python3 src/dashboard_server.py
 
 Extra arguments are passed to the collector: `./start.sh --interval 10 --scan-every 600`.
 
-## Run in the background
+### Option 2: background service
 
-To keep monitoring without a terminal window, run it as a background service. It works the same on macOS and Windows, needs no administrator rights, and you can stop it whenever you like.
+To keep monitoring without a terminal window, run it as a background service. It works the same on macOS and Windows, needs no administrator rights, and you can stop it whenever you like. Run only one of the two options at a time, since both use port 8765.
 
 macOS (`./service.sh`) and Windows (`service.bat`) take the same commands:
 
@@ -119,6 +129,7 @@ macOS (`./service.sh`) and Windows (`service.bat`) take the same commands:
 ./service.sh stop
 ```
 
+- **Stop from the dashboard:** when the dashboard is served by the background service, a **Stop** button appears in the header. It stops the collector and the dashboard after you confirm. Starting again cannot be done from the page, because the page stops with the service. Use `start` (or `open`), or `install` to start at login. In foreground mode there is no Stop button, so use Ctrl-C.
 - `stop` ends it for now. If you used `install`, it starts again at your next login until you run `uninstall`.
 - Extra arguments go to the collector, for example `./service.sh install --interval 10 --scan-every 600`. `install` remembers them for the login start. Environment variables such as `PORT` are not remembered.
 - A supervisor restarts the collector or the dashboard if either one crashes. Its own messages go to `logs/service.log`, which is rotated and stays under about 1.5 MB.

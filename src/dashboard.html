@@ -78,6 +78,10 @@
   #tip { position: fixed; z-index: 1000; display: none; max-width: 300px; padding: 8px 10px; border-radius: 8px; background: var(--text); color: var(--bg); font: 400 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; box-shadow: 0 4px 16px rgba(0,0,0,.25); pointer-events: none; text-transform: none; letter-spacing: 0; text-align: left; white-space: normal; }
   .themebtn { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 3px 12px; font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
   .themebtn:hover { border-color: var(--c1); }
+  .stopbtn:hover { border-color: var(--bad); color: var(--bad); }
+  #stopped { text-align: center; margin: 12vh auto; max-width: 520px; color: var(--muted); line-height: 1.6; }
+  #stopped h2 { color: var(--text); }
+  #stopped code { background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 1px 6px; }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 32px; }
@@ -155,6 +159,7 @@
       <button data-s="10800">3h</button>
       <button data-s="0">All</button>
     </div><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="window">i</span></span>
+    <span class="ctl" id="stopctl" hidden><button class="themebtn stopbtn" id="stopBtn" type="button" title="Stop the background service: monitoring and this page end until you start it again">■ Stop</button></span>
     <span class="ctl"><button class="themebtn" id="themeBtn" type="button" title="Switch between automatic (follows your system), light and dark"></button><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="theme">i</span></span>
   </header>
 
@@ -816,6 +821,17 @@ $('#win').addEventListener('click', e => {
   winSec = +b.dataset.s; sel = null; zoom = null;
   if (day) pickDay(''); else render();
 });
+// ---- stop the background service (offered only when the page is served by `service.py`)
+fetch('/api/service', { cache: 'no-store' }).then(r => r.json()).then(j => { if (j.controllable) $('#stopctl').hidden = false; }).catch(() => {});
+$('#stopBtn').addEventListener('click', async () => {
+  if (!confirm('Stop WiFiMonitor?\n\nMonitoring and this page end until you start the service again. Your logs are kept.')) return;
+  try {
+    const r = await fetch('/api/service', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ action: 'stop' }) });
+    if (!r.ok) throw new Error(r.status);
+  } catch (err) { $('#evmsg').textContent = 'Could not stop the service from here. Run the stop command in a terminal.'; return; }
+  window.stopped = true;
+  document.querySelector('.wrap').innerHTML = '<div id="stopped"><h2>WiFiMonitor stopped</h2><p>The collector and this dashboard are no longer running. Your logs are kept.</p><p>To start again, run <code>./service.sh start</code> (macOS) or <code>service.bat start</code> (Windows), or start it automatically at login with <code>install</code>.</p></div>';
+});
 // ---- theme: Auto (follows the OS), Light, Dark; remembered in this browser
 const THEMES = ['auto', 'light', 'dark'], THEME_LABEL = { auto: '◐ Auto', light: '☀ Light', dark: '☾ Dark' };
 let theme = 'auto';
@@ -1071,7 +1087,7 @@ document.querySelectorAll('.card h2 .hint').forEach(h => {
   if (EXPORTS[key] && card) card.insertAdjacentHTML('afterbegin', `<button class="expbtn" type="button" data-exp="${key}" aria-haspopup="menu" aria-expanded="false" aria-label="Export data" title="Export this data as CSV, Excel, JSON or image (follows the selected range)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg></button>`);
 });
 
-init(); load(); loadDays(); setInterval(() => { if (!isPast() && !zoom) load(); }, 5000);
+init(); load(); loadDays(); setInterval(() => { if (!isPast() && !zoom && !window.stopped) load(); }, 5000);
 </script>
 </body>
 </html>
