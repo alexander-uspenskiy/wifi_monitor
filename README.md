@@ -193,6 +193,7 @@ Scans make the radio briefly leave its channel and can cause a slow or lost ping
 - **Select a range:** drag across the latency chart, the signal and noise chart, or the SNR chart to select a time range. The selection is shared, so the band appears on all three. The signal and noise and SNR charts also show the time range they cover under their titles, including the selected range. A panel shows router and internet latency and loss, signal, SNR, channel changes, the events inside the range and the likely-cause table for just that range. "Zoom all charts to this range" stretches every chart and tile to the selection and pauses live refresh. "Reset zoom" or the Escape key returns to normal.
 - **Export:** every chart and table has a download icon (a tray with a downward arrow) in its top right corner. It downloads that card's data as **CSV**, **Excel (.xlsx)** or **JSON**, and charts can also be saved as a **PNG image**. The menu shows exactly what will be exported. The range follows what you are looking at: the zoomed range if you zoomed, otherwise the dragged selection, otherwise the selected day or time window (15m, 1h, 3h, All). The Daily summary always exports all days. File names include the time range, for example `wifi-latency_20261009-1229_20261009-1251.csv`. JSON files also carry the range and row count. The Excel files are written by the page itself, so nothing extra is installed or downloaded.
 - **Chart range:** the charts follow the 15m, 1h, 3h or All window. When the logs hold less data than the window, for example on a first run, the time axis starts at your first sample so the data fills the chart instead of leaving it mostly empty.
+- **Measurement errors:** if a ping or the Wi-Fi status cannot be measured (not the same as a lost ping), the tiles show `ERR`, the status says "Measurement error", a banner explains why while it lasts, and the Events card and latency chart mark the start and the recovery. These samples are not counted as packet loss, outages or unavailability, and the Packet loss tile says how many were not measured.
 - **Stop button:** when the dashboard is served by the background service (see [Option 2](#option-2-background-service)), a **Stop** button with an (i) help icon appears in the header. It ends the collector and the dashboard. It does not appear when you started with `--terminal`.
 - **Scanning switch:** the "Scanning on" switch in the header pauses and resumes nearby-network scans without stopping the collector. Use it before an important call, because a scan briefly leaves your channel and can cost a lost ping. After you resume, the next scan waits a full interval. Each change is logged as a note, so pauses show up in the Events list. The setting is kept in `logs/control.json`, which the collector re-reads every sample.
 - **Theme:** the button in the header cycles Auto (follows your system), Light and Dark. Your choice is remembered in the browser.
@@ -229,10 +230,12 @@ One line per sample:
 2026-10-09 11:07:41 gateway_ms=3.834 internet_ms=32.525 rssi=-68 noise=-80 snr=12 ch=36 band=5GHz width=80MHz tx=325Mbps phy=11ac
 ```
 
-- `gateway_ms` and `internet_ms` are round-trip times, or `LOST` when no reply came back.
-- `rssi=NA (not associated)` means the computer was not connected to Wi-Fi.
+- `gateway_ms` and `internet_ms` are round-trip times, or `LOST` when the ping ran and no reply came back.
+- `ERR` (in place of a time) means the ping itself could not be done, for example the command failed, timed out or printed something unreadable. It is not packet loss and the dashboard does not count it as loss, an outage or unavailability.
+- `rssi=NA (not associated)` means the computer was really not connected to Wi-Fi.
+- `wifi=ERR` (in place of the Wi-Fi fields) means the Wi-Fi status could not be read, for example because Windows is not in English. It is not a disconnect.
 - On Windows, `noise`, `snr` and `width` are not available, so those fields are left out.
-- Lines starting with a date and `EVENT` are notes.
+- Lines starting with a date and `EVENT` are notes. When something cannot be measured for three samples in a row (at once for an unsupported language), the collector also writes `EVENT Measurement error: ...` with the reason, and `EVENT Measurement recovered: ...` when it works again. They show on the dashboard as measurement errors and are also printed to `logs/service.log`.
 
 Scan lines are a timestamp followed by JSON: `{"own":[36,"5","80"],"nets":[[channel,"band",rssi],...]}`.
 
@@ -252,6 +255,7 @@ src/
   dashboard.html          the dashboard page
   logstore.py             daily log files, rotation, compression, reading
   macos/wifi-info.swift   CoreWLAN helper, built into bin/ on first run
+tests/                    automated tests (see "Running the tests")
 logs/                     log files (ignored by git)
 bin/                      built macOS helper (ignored by git)
 ```
@@ -262,10 +266,11 @@ The server only listens on `127.0.0.1`. It only accepts notes, the scanning swit
 
 - **Network name and BSSID are not recorded.** macOS hides them from programs without Location Services permission, so the collector does not read them.
 - **Windows signal strength is approximate.** Windows reports signal as a percentage, which is converted with `dBm = percent / 2 - 100`. Noise and channel width are not reported.
+- **Measurement errors are kept apart from real problems.** A command that fails, times out or prints something unreadable is logged as `ERR` and a measurement error event. It is left out of packet loss, outages, availability and the call-ready score, and the dashboard shows a banner, an "ERR" value on the tiles, a "Measurement error" status and an entry in the Events card.
 - **Missing fields are handled cleanly.** When the system does not report noise, SNR or channel width (Windows), the dashboard hides what has no data, shows "not reported here" on the tiles and adds a short note under the Signal and SNR charts. If no Wi-Fi details are logged at all, those notes say what to check, and the collector prints a one-time warning when `netsh` returns nothing. Ping-based tiles and charts keep working either way.
-- **Windows needs an English display language.** The collector reads `netsh` labels such as "Signal" and "Channel", and other languages use different words. Windows 11 24H2 and newer may also need Location Services turned on for `netsh wlan` to return results.
+- **Windows needs an English display language, and other languages are not supported yet.** The collector reads `netsh` labels such as "State" and "Signal", and other languages use different words. When it sees non-English output, it logs `wifi=ERR` and a measurement error event that names the language, prints a warning at start-up, and the dashboard shows a banner saying the language is not supported yet. Ping times are still read in most languages, and real packet loss is still recognised in any language. macOS does not depend on the system language. Windows 11 24H2 and newer may also need Location Services turned on for `netsh wlan` to return results.
 - **Windows scans use Windows' cached scan results,** which can be a little stale. macOS scans are live.
-- **The Windows code is tested against sample `netsh` output only,** not on a real Windows machine.
+- **The Windows code is tested against sample `netsh` and `ping` output only,** not on a real Windows machine. The automated tests run on any system.
 - Linux is not supported.
 
 ## Troubleshooting
@@ -277,6 +282,16 @@ The server only listens on `127.0.0.1`. It only accepts notes, the scanning swit
 - **Service port:** `PORT=8800 ./service.sh start` runs the service on that port. Use the same `PORT` for `status`, and note that the login start from `install` always uses the default 8765.
 - **Dashboard is not reachable after `service.sh start`:** it prints where to look. Read `logs/service.log`, which shows the output of both processes and any restarts.
 - **The Stop button is missing:** the page was not started by the service. Stop it with Ctrl-C in its window, or use the `service` commands to run it in the background.
+
+## Running the tests
+
+The tests use only the Python standard library, plus Node.js for the dashboard logic tests (they are skipped if Node is missing). They need no network, no Wi-Fi and no administrator rights, and they never touch your `logs/` folder.
+
+```bash
+python3 -m unittest discover -s tests          # python -m unittest discover -s tests on Windows
+```
+
+They cover the ping and `netsh` parsing for both systems (including real loss versus measurement errors, other languages and the unsupported-language error), the log line format, the collector loop, the server's parsing and daily summary, the start launcher and service helpers, and the dashboard's availability, loss and event logic. Windows and macOS behaviour is simulated with sample outputs, so a pass is not a substitute for trying the Windows build on a real machine.
 
 ## License
 

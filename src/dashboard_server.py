@@ -43,6 +43,9 @@ def parse(line):
         "net": num(net),
         "gwLost": gw == "LOST",
         "netLost": net == "LOST",
+        "gwErr": gw == "ERR",  # could not be measured: neither loss nor a reply
+        "netErr": net == "ERR",
+        "wifiErr": kv.get("wifi") == "ERR",
         "assoc": "not associated" not in rest,
         "rssi": num(kv.get("rssi")),
         "noise": num(kv.get("noise")),
@@ -102,10 +105,14 @@ def summarize(rows, notes):
             if prev_key and key != prev_key:
                 changes += 1
             prev_key = key
-    pct = lambda k: round(100 * sum(1 for r in rows if r[k]) / n, 1) if n else None
+    # loss is a share of the pings that could be measured; samples with an ERR for that target are left out
+    def pct(k, err):
+        ok = [r for r in rows if not r[err]]
+        return round(100 * sum(1 for r in ok if r[k]) / len(ok), 1) if ok else None
     return {
         "samples": n,
-        "gwLoss": pct("gwLost"), "netLoss": pct("netLost"),
+        "gwLoss": pct("gwLost", "gwErr"), "netLoss": pct("netLost", "netErr"),
+        "errSamples": sum(1 for r in rows if r["gwErr"] or r["netErr"] or r["wifiErr"]),
         "gwP95": _pct(gw, .95), "netP95": _pct(net, .95), "netMedian": _pct(net, .5),
         "outageMin": round(outage / 60, 1), "changes": changes,
         "rssi": _avg([r["rssi"] for r in rows if r["rssi"] is not None]),

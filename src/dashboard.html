@@ -78,6 +78,7 @@
   #tip { position: fixed; z-index: 1000; display: none; max-width: 300px; padding: 8px 10px; border-radius: 8px; background: var(--text); color: var(--bg); font: 400 12px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; box-shadow: 0 4px 16px rgba(0,0,0,.25); pointer-events: none; text-transform: none; letter-spacing: 0; text-align: left; white-space: normal; }
   .themebtn { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 3px 12px; font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
   .themebtn:hover { border-color: var(--c1); }
+  .mbanner { margin: 0 0 12px; padding: 9px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--warn); border-left-width: 5px; font-size: 13px; line-height: 1.5; }
   .stopbtn:hover { border-color: var(--bad); color: var(--bad); }
   #stopped { text-align: center; margin: 12vh auto; max-width: 520px; color: var(--muted); line-height: 1.6; }
   #stopped h2 { color: var(--text); }
@@ -163,6 +164,7 @@
     <span class="ctl"><button class="themebtn" id="themeBtn" type="button" title="Switch between automatic (follows your system), light and dark"></button><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="theme">i</span></span>
   </header>
 
+  <div class="mbanner" id="mbanner" role="alert" hidden></div>
   <section class="tiles" id="tiles"></section>
 
   <section class="grid">
@@ -208,7 +210,7 @@ const TIPS = {
   theme: "Cycles Auto (follows your system), Light and Dark. Remembered in this browser.",
   router: "Ping time to your router, the first hop. Slow or lost replies here mean a Wi-Fi or router problem. Under about 20 ms is typical. The second line shows the median and 95th percentile (19 of 20 pings were faster) for the selected window.",
   internet: "Ping time to 1.1.1.1 across your whole connection. If the router is fast but this is slow or lost, the problem is beyond your Wi-Fi, such as your ISP. Under about 60 ms is good for calls.",
-  loss: "Share of pings that got no reply in the selected window. Video calls start to suffer above about 1%.",
+  loss: "Share of pings that got no reply in the selected window. Video calls start to suffer above about 1%. Pings that could not be measured at all (shown as ERR) are left out of this share.",
   rssi: "How strongly your computer hears the access point, in dBm. Closer to zero is better: -50 is excellent, -67 is about the minimum for reliable calls, -75 or lower is weak. Noise is the background radio level.",
   snr: "Signal minus noise, in dB. 25 or more is good, below 15 is poor even if the signal looks strong. Not available on Windows.",
   channel: "The Wi-Fi channel, band, channel width and standard you are connected on. A change means your computer or router switched channels or bands, which briefly interrupts the connection.",
@@ -223,7 +225,7 @@ const TIPS = {
   txchart: "The negotiated Wi-Fi link speed over time. Frequent drops to low rates mean a weak or noisy link.",
   events: "A timeline of outages, channel or band changes, gaps where nothing was logged, and your own notes. Type a note when you change something (the quick buttons start a note for you) so you can compare before and after.",
   daily: "One row per day of logs. Click a row to open that day. Orange and red cells flag high loss, slow pings, or outages.",
-  evcount: "How many things happened in the current view: outages (router and internet both unreachable, or Wi-Fi disconnected), channel or band changes, and notes you added. The Events card lists them with times.",
+  evcount: "How many things happened in the current view: outages (router and internet both unreachable, or Wi-Fi disconnected), channel or band changes, and notes you added. The Events card lists them with times. Measurement errors (the tool could not read a ping or the Wi-Fi status, for example on a non-English Windows) are counted too and are not packet loss.",
   avail: "Share of observed time that both your router and the internet answered. A moment counts as unavailable when either ping is lost or Wi-Fi is disconnected. Time with no data (computer asleep, collector off) is not counted either way. 99.5% or more is healthy. The second line shows the router and internet shares on their own, and the longest continuous stretch when either was unavailable. A lower internet share with a healthy router share points beyond your Wi-Fi.",
   jitter: "How much the internet ping changes from one sample to the next. Calls need steady delivery: under 10 ms is good, and above 30 ms causes choppy audio and video even when the average ping looks fine. The second line shows the 95th percentile.",
   callready: "Share of samples good enough for a video call: router ping under 50 ms, internet ping under 150 ms, nothing lost, and signal-to-noise of at least 20 dB (when the system reports it). Worst stretch is the longest unbroken run of samples that were not ready.",
@@ -365,9 +367,9 @@ const fixBlock = key => {
 document.addEventListener('toggle', e => { const d = e.target; if (d.matches && d.matches('details.fix')) { if (d.open) openFix.add(d.dataset.fix); else openFix.delete(d.dataset.fix); } }, true);
 
 // ---- event markers on the latency chart and the "likely cause" analysis
-const markerVis = { notes: true, changes: true, outages: true, scans: true };
-const MARKER_NAMES = { notes: 'Notes', changes: 'Channel/band changes', outages: 'Outages and gaps', scans: 'Scans' };
-const markerColor = t => ({ notes: css('--c1'), changes: css('--c2'), outages: css('--bad'), scans: css('--muted') })[t];
+const markerVis = { notes: true, changes: true, outages: true, errors: true, scans: true };
+const MARKER_NAMES = { notes: 'Notes', changes: 'Channel/band changes', outages: 'Outages and gaps', errors: 'Measurement errors', scans: 'Scans' };
+const markerColor = t => ({ notes: css('--c1'), changes: css('--c2'), outages: css('--bad'), errors: css('--warn'), scans: css('--muted') })[t];
 
 const markerPlugin = {
   id: 'markers',
@@ -411,6 +413,9 @@ const bandPlugin = {
   },
 };
 
+// events the collector writes when it could not take a measurement (it is not packet loss), kept apart from the user's own notes
+const isMeasure = n => /^Measurement (error|recovered):/.test(n.text);
+
 function buildMarkers(rows) {
   const out = []; let down = null, prev = null, prevKey = null;
   for (const d of rows) {
@@ -428,6 +433,7 @@ function buildMarkers(rows) {
   if (down && prev) out.push({ type: 'outages', kind: 'outage', x: down.x, x1: prev.x, text: `Outage ongoing since ${fmtTS(down.x)}` });
   if (rows.length) {
     for (const n of notes) if (n.x >= rows[0].x) out.push({ type: 'notes', x: n.x, text: `Note: ${n.text}` });
+    for (const n of merrs) if (n.x >= rows[0].x) out.push({ type: 'errors', x: n.x, text: n.text });
     for (const sc of scans) if (sc.x >= rows[0].x) out.push({ type: 'scans', x: sc.x, text: 'Nearby-network scan (this tool)' });
   }
   return out;
@@ -468,17 +474,23 @@ function qualityStats(rows, xmin, xmax) {
   const longest = outages.reduce((a, m) => Math.max(a, m.x1 - m.x), 0);
   // availability: observed time only (gaps with no data are skipped). A sample counts as unavailable when the router OR the internet
   // ping is lost, or Wi-Fi is disconnected; the router and internet shares are also tracked on their own.
-  let seen = 0, down = 0, gwDown = 0, netDown = 0, run = 0, longestDown = 0, jit = [];
+  let seen = 0, seenGw = 0, seenNet = 0, down = 0, gwDown = 0, netDown = 0, run = 0, longestDown = 0, jit = [];
   const gaps = [];
   for (let i = 0; i + 1 < rows.length; i++) {
     const a = rows[i], b = rows[i + 1], dt = b.x - a.x;
     if (dt > GAP_MS) run = 0;
     if (dt <= GAP_MS) {
-      seen += dt; gaps.push(dt);
+      gaps.push(dt);
+      // a ping that could not be measured (ERR) is unknown, not down; a Wi-Fi disconnect is known whatever the pings say
       const off = a.assoc === false, gwBad = a.gwLost || off, netBad = a.netLost || off;
-      if (gwBad) gwDown += dt;
-      if (netBad) netDown += dt;
-      if (gwBad || netBad) { down += dt; run += dt; longestDown = Math.max(longestDown, run); } else run = 0;
+      const gwKnown = off || !a.gwErr, netKnown = off || !a.netErr;
+      if (gwKnown) { seenGw += dt; if (gwBad) gwDown += dt; }
+      if (netKnown) { seenNet += dt; if (netBad) netDown += dt; }
+      const anyBad = (gwKnown && gwBad) || (netKnown && netBad);
+      if (anyBad || (gwKnown && netKnown)) {
+        seen += dt;
+        if (anyBad) { down += dt; run += dt; longestDown = Math.max(longestDown, run); } else run = 0;
+      } else run = 0;
       if (a.net != null && b.net != null) jit.push(Math.abs(b.net - a.net));
     }
   }
@@ -486,16 +498,17 @@ function qualityStats(rows, xmin, xmax) {
   const step = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 5000;
   // call-ready: share of samples meeting thresholds, and the longest run that did not
   const ready = d => d.gw != null && d.gw < 50 && d.net != null && d.net < 150 && !d.gwLost && !d.netLost && d.assoc !== false && (d.snr == null || d.snr >= 20);
+  const measured = rows.filter(d => !d.gwErr && !d.netErr);  // samples where both pings were actually taken
   let ok = 0, runStart = null, runEnd = null, worst = 0;
-  for (const d of rows) {
+  for (const d of measured) {
     if (ready(d)) { ok++; runStart = null; }
     else { if (runStart == null) runStart = d.x; runEnd = d.x; worst = Math.max(worst, runEnd - runStart + step); }
   }
   return {
-    outages: outages.length, changes, notes: noteN, longest,
-    avail: seen ? 100 * (1 - down / seen) : null, availGw: seen ? 100 * (1 - gwDown / seen) : null, availNet: seen ? 100 * (1 - netDown / seen) : null, longestDown,
+    outages: outages.length, changes, notes: noteN, longest, errors: mk.filter(m => m.type === 'errors' && m.text.startsWith('Measurement error')).length,
+    avail: seen ? 100 * (1 - down / seen) : null, availGw: seenGw ? 100 * (1 - gwDown / seenGw) : null, availNet: seenNet ? 100 * (1 - netDown / seenNet) : null, longestDown,
     jitter: jit.length ? jit.reduce((x, y) => x + y, 0) / jit.length : null, jitterP95: pct(jit, .95),
-    call: rows.length ? 100 * ok / rows.length : null, worst: ok === rows.length ? 0 : worst,
+    call: measured.length ? 100 * ok / measured.length : null, worst: ok === measured.length ? 0 : worst,
   };
 }
 
@@ -514,7 +527,7 @@ function renderSpikes(rows, markers) {
 }
 
 let sel = null, zoom = null;  // sel: dragged range awaiting a decision; zoom: range every chart is zoomed to (ms since epoch)
-let winSec = 3600, all = [], scans = [], notes = [], days = [], day = null, daysAt = 0, charts = {};
+let winSec = 3600, all = [], scans = [], notes = [], merrs = [], days = [], day = null, daysAt = 0, charts = {};
 const todayStr = () => new Date().toLocaleDateString('en-CA');
 const isPast = () => !!day && day !== todayStr();
 
@@ -622,6 +635,7 @@ function events(rows) {
   }
   if (out) ev.push({ x: out.start, tag: 'bad', label: 'OUTAGE', text: `Ongoing — since ${fmtTS(out.start)}` });
   for (const n of notes) if ((!rows.length || n.x >= rows[0].x) && (!zoom || n.x <= zoom.b)) ev.push({ x: n.x, tag: 'info', label: 'NOTE', text: n.text });
+  for (const n of merrs) if ((!rows.length || n.x >= rows[0].x) && (!zoom || n.x <= zoom.b)) ev.push({ x: n.x, tag: n.text.startsWith('Measurement error') ? 'warn' : 'info', label: n.text.startsWith('Measurement error') ? 'ERROR' : 'OK', text: n.text });
   return ev.sort((a, b) => b.x - a.x).slice(0, 15);
 }
 
@@ -645,27 +659,38 @@ function render() {
   else if (past) st = [`Viewing ${day}`, 'c1'];
   else if (stale) st = ['No recent data — is the logger running?', 'warn'];
   else if (last.assoc === false || (last.gwLost && last.netLost)) st = ['Down', 'bad'];
+  else if (last.gwErr || last.netErr || last.wifiErr) st = ['Measurement error', 'warn'];
   else if (last.gwLost || last.netLost || (last.snr != null && last.snr < 20) || (last.rssi != null && last.rssi < -72) || (last.net != null && last.net > 150)) st = ['Degraded', 'warn'];
   $('#status').textContent = st[0]; $('#dot').style.background = css('--' + st[1]);
+  // a measurement that could not be taken is a tool or system problem, not Wi-Fi loss: say so prominently while it lasts
+  const mb = $('#mbanner'), errNow = !past && !zoom && !stale && last && (last.gwErr || last.netErr || last.wifiErr);
+  mb.hidden = !errNow;
+  if (errNow) {
+    const what = [last.gwErr && 'router ping', last.netErr && 'internet ping', last.wifiErr && 'Wi-Fi status'].filter(Boolean).join(', ');
+    const why = merrs.filter(n => n.text.startsWith('Measurement error')).pop();
+    mb.textContent = `Measurement problem: ${what} could not be measured on the latest sample. ` + (why ? why.text.replace(/^Measurement error: /, '') : 'These samples are not counted as packet loss or a disconnect. See logs/service.log.');
+  }
 
   // tiles
   const gwOk = rows.filter(d => d.gw != null).map(d => d.gw);
   const netOk = rows.filter(d => d.net != null).map(d => d.net);
   const gwLost = rows.filter(d => d.gwLost).length, netLost = rows.filter(d => d.netLost).length;
-  const lp = n => rows.length ? (100 * n / rows.length).toFixed(1) + '%' : '–';
+  // loss is a share of the pings that were actually taken; samples where a ping could not be measured (ERR) are left out
+  const gwN = rows.filter(d => !d.gwErr).length, netN = rows.filter(d => !d.netErr).length, errN = rows.filter(d => d.gwErr || d.netErr).length;
+  const lp = (n, N) => N ? (100 * n / N).toFixed(1) + '%' : '–';
   const sev = (v, warn, bad) => v == null ? '' : v >= bad ? css('--bad') : v >= warn ? css('--warn') : css('--good');
   const rs = (last && last.rssi != null) ? last.rssi : null;
   const q = qualityStats(rows, xmin, xmax);
-  const evTotal = q.outages + q.changes + q.notes, plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+  const evTotal = q.outages + q.changes + q.notes + q.errors, plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
   $('#tiles').innerHTML = [
-    tile(past || zoom ? 'Router (last)' : 'Router now', last && last.gw != null ? f1(last.gw) + ' ms' : (last && last.gwLost ? 'LOST' : '–'), `median ${f1(pct(gwOk, .5))} · p95 ${f1(pct(gwOk, .95))} ms`, last && last.gwLost ? css('--bad') : sev(last && last.gw, 50, 150)),
-    tile(past || zoom ? 'Internet (last)' : 'Internet now', last && last.net != null ? f1(last.net) + ' ms' : (last && last.netLost ? 'LOST' : '–'), `median ${f1(pct(netOk, .5))} · p95 ${f1(pct(netOk, .95))} ms`, last && last.netLost ? css('--bad') : sev(last && last.net, 100, 200)),
-    tile('Packet loss', lp(netLost), `router ${lp(gwLost)} · internet ${lp(netLost)}`, sev(rows.length ? 100 * netLost / rows.length : null, 1, 5)),
+    tile(past || zoom ? 'Router (last)' : 'Router now', last && last.gw != null ? f1(last.gw) + ' ms' : (last && last.gwLost ? 'LOST' : last && last.gwErr ? 'ERR' : '–'), `median ${f1(pct(gwOk, .5))} · p95 ${f1(pct(gwOk, .95))} ms`, last && last.gwLost ? css('--bad') : last && last.gwErr ? css('--warn') : sev(last && last.gw, 50, 150)),
+    tile(past || zoom ? 'Internet (last)' : 'Internet now', last && last.net != null ? f1(last.net) + ' ms' : (last && last.netLost ? 'LOST' : last && last.netErr ? 'ERR' : '–'), `median ${f1(pct(netOk, .5))} · p95 ${f1(pct(netOk, .95))} ms`, last && last.netLost ? css('--bad') : last && last.netErr ? css('--warn') : sev(last && last.net, 100, 200)),
+    tile('Packet loss', lp(netLost, netN), `router ${lp(gwLost, gwN)} · internet ${lp(netLost, netN)}` + (errN ? ` · ${errN} not measured` : ''), sev(netN ? 100 * netLost / netN : null, 1, 5)),
     tile('Signal (RSSI)', rs != null ? rs + ' dBm' : 'n/a', last && last.noise != null ? `noise ${last.noise} dBm` : (rs != null ? 'noise not reported' : ''), rs == null ? '' : rs <= -75 ? css('--bad') : rs <= -67 ? css('--warn') : css('--good')),
     tile('SNR', last && last.snr != null ? last.snr + ' dB' : 'n/a', last && last.snr != null ? 'aim for 25+' : 'not reported here', last && last.snr != null ? (last.snr < 15 ? css('--bad') : last.snr < 25 ? css('--warn') : css('--good')) : ''),
     tile('Channel', last && last.ch != null ? `${last.ch}` : 'n/a', last && last.ch != null ? [`${last.band} GHz`, last.width != null ? `${last.width} MHz` : null, last.phy ? `802.${last.phy}` : null].filter(Boolean).join(' · ') : ''),
     tile('Tx rate', last && last.tx != null ? last.tx + ' Mbps' : 'n/a', ''),
-    tile('Events', rows.length ? evTotal : 'n/a', rows.length ? `${plural(q.outages, 'outage')} · ${plural(q.changes, 'channel change')} · ${plural(q.notes, 'note')}` : '', q.outages ? css('--bad') : q.changes >= 3 ? css('--warn') : css('--good')),
+    tile('Events', rows.length ? evTotal : 'n/a', rows.length ? `${plural(q.outages, 'outage')} · ${plural(q.changes, 'channel change')} · ${plural(q.notes, 'note')}` + (q.errors ? ` · ${plural(q.errors, 'measurement error')}` : '') : '', q.outages ? css('--bad') : q.changes >= 3 || q.errors ? css('--warn') : css('--good')),
     tile('Availability', q.avail == null ? 'n/a' : fmtAvail(q.avail) + '%', q.avail == null ? '' : `router ${fmtAvail(q.availGw)}% · internet ${fmtAvail(q.availNet)}%` + (q.longestDown ? ` · longest drop ${fmtDur(q.longestDown / 1000)}` : ''), q.avail == null ? '' : q.avail >= 99.5 ? css('--good') : q.avail >= 98 ? css('--warn') : css('--bad')),
     tile('Jitter', q.jitter == null ? 'n/a' : f1(q.jitter) + ' ms', q.jitter == null ? '' : `p95 ${f1(q.jitterP95)} ms`, q.jitter == null ? '' : q.jitter < 10 ? css('--good') : q.jitter <= 30 ? css('--warn') : css('--bad')),
     tile('Call-ready', q.call == null ? 'n/a' : q.call.toFixed(0) + '%', q.call == null ? '' : q.worst ? `worst stretch ${fmtDur(q.worst / 1000)}` : 'no bad stretches', q.call == null ? '' : q.call >= 95 ? css('--good') : q.call >= 85 ? css('--warn') : css('--bad')),
@@ -800,7 +825,7 @@ async function load() {
     const r = await fetch('/api/data' + q, { cache: 'no-store' });
     all = (await r.json()).map(d => ({ ...d, x: pT(d.t) }));
     try { scans = (await (await fetch('/api/scan' + q, { cache: 'no-store' })).json()).map(d => ({ ...d, x: pT(d.t) })); } catch (e) { scans = []; }
-    try { notes = (await (await fetch('/api/events' + q, { cache: 'no-store' })).json()).map(d => ({ ...d, x: pT(d.t) })); } catch (e) { notes = []; }
+    try { const ev = (await (await fetch('/api/events' + q, { cache: 'no-store' })).json()).map(d => ({ ...d, x: pT(d.t) })); notes = ev.filter(n => !isMeasure(n)); merrs = ev.filter(isMeasure); } catch (e) { notes = []; merrs = []; }
     render();
     if (Date.now() - daysAt > 60000) loadDays();
     loadControl();
@@ -972,7 +997,7 @@ function rangeBounds() {
 }
 const inR = (x, r) => x >= r.a && x <= r.b;
 const EXPORTS = {
-  latency: r => ({ cols: ['time', 'router_ms', 'internet_ms', 'router_lost', 'internet_lost'], rows: all.filter(d => inR(d.x, r)).map(d => [d.t, d.gw, d.net, d.gwLost ? 1 : 0, d.netLost ? 1 : 0]) }),
+  latency: r => ({ cols: ['time', 'router_ms', 'internet_ms', 'router_lost', 'internet_lost', 'router_error', 'internet_error'], rows: all.filter(d => inR(d.x, r)).map(d => [d.t, d.gw, d.net, d.gwLost ? 1 : 0, d.netLost ? 1 : 0, d.gwErr ? 1 : 0, d.netErr ? 1 : 0]) }),
   signal: r => ({ cols: ['time', 'rssi_dbm', 'noise_dbm'], rows: all.filter(d => inR(d.x, r) && d.rssi != null).map(d => [d.t, d.rssi, d.noise]) }),
   snrchart: r => ({ cols: ['time', 'snr_db', 'rssi_dbm', 'noise_dbm'], rows: all.filter(d => inR(d.x, r) && d.rssi != null).map(d => [d.t, d.snr, d.rssi, d.noise]) }),
   txchart: r => ({ cols: ['time', 'tx_mbps', 'channel', 'band_ghz', 'width_mhz', 'standard'], rows: all.filter(d => inR(d.x, r) && d.rssi != null).map(d => [d.t, d.tx, d.ch, d.band, d.width, d.phy]) }),
@@ -992,10 +1017,10 @@ const EXPORTS = {
       rows: buildMarkers(rs).filter(m => m.type !== 'scans' && inR(m.x, r)).sort((a, b) => a.x - b.x)
         .map(m => [new Date(m.x - new Date(m.x).getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace('T', ' '),
                    m.x1 != null ? new Date(m.x1 - new Date(m.x1).getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace('T', ' ') : null,
-                   m.type === 'outages' ? (m.kind === 'gap' ? 'gap' : 'outage') : m.type === 'changes' ? 'channel_change' : 'note', m.text]) };
+                   m.type === 'outages' ? (m.kind === 'gap' ? 'gap' : 'outage') : m.type === 'changes' ? 'channel_change' : m.type === 'errors' ? 'measurement' : 'note', m.text]) };
   },
-  daily: () => ({ cols: ['day', 'samples', 'router_loss_pct', 'internet_loss_pct', 'router_p95_ms', 'internet_p95_ms', 'internet_median_ms', 'outage_min', 'band_channel_changes', 'avg_rssi_dbm', 'avg_snr_db', 'notes'],
-    rows: days.map(d => [d.day, d.samples, d.gwLoss, d.netLoss, d.gwP95, d.netP95, d.netMedian, d.outageMin, d.changes, d.rssi, d.snr, d.notes.join(' | ')]) }),
+  daily: () => ({ cols: ['day', 'samples', 'router_loss_pct', 'internet_loss_pct', 'router_p95_ms', 'internet_p95_ms', 'internet_median_ms', 'outage_min', 'band_channel_changes', 'avg_rssi_dbm', 'avg_snr_db', 'notes', 'measurement_error_samples'],
+    rows: days.map(d => [d.day, d.samples, d.gwLoss, d.netLoss, d.gwP95, d.netP95, d.netMedian, d.outageMin, d.changes, d.rssi, d.snr, d.notes.join(' | '), d.errSamples]) }),
 };
 const EXPORT_CHART = { latency: 'lat', signal: 'sig', snrchart: 'snr', txchart: 'tx', sharing: 'crowd', bychannel: 'ch', leastcrowded: 'blocks' };
 const EXPORT_NAME = { latency: 'latency', signal: 'signal', snrchart: 'snr', txchart: 'tx-rate', sharing: 'channel-sharing', bychannel: 'channels-nearby', leastcrowded: 'least-crowded', events: 'events', daily: 'daily-summary' };

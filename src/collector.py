@@ -10,6 +10,7 @@ import concurrent.futures as cf
 import datetime as dt
 import json
 import os
+import platform
 import re
 import shutil
 import subprocess
@@ -27,31 +28,125 @@ HELPER_BIN = os.path.join(logstore.ROOT, "bin", "wifi-info")
 MAC_PHY = ["?", "a", "b", "g", "n", "ac", "ax"]
 
 
-def run(cmd, timeout=10):
+ERR = "ERR"  # a measurement that could not be taken, as opposed to LOST (a ping that got no reply) or a real disconnect
+CREATE_NO_WINDOW = 0x08000000
+
+
+class Cmd:
+    """Outcome of one external command: exit code, text, stderr, and `error` when it could not run at all."""
+    def __init__(self, rc=None, out="", err="", error=None):
+        self.rc, self.out, self.err, self.error = rc, out, err, error
+
+
+def _decode(b):
+    return (b or b"").decode("oem" if IS_WIN else "utf-8", errors="replace")  # console tools write in the OEM code page on Windows
+
+
+UNSUPPORTED = "unsupported Windows display language"  # reasons starting with this are announced at once and never clear by themselves
+
+
+def non_english(text):
+    """True when command output contains letters outside ASCII, which means a localised Windows."""
+    return any(ch.isalpha() and ord(ch) > 127 for ch in text or "")
+
+
+def display_language():
+    """(name, is_english) for the Windows display language, e.g. ("ru_RU", False); None when unknown.
+    Always None on macOS: the ping, route and CoreWLAN helper output used there does not depend on the system language."""
+    if not IS_WIN:
+        return None
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, errors="replace", timeout=timeout).stdout
-    except (OSError, subprocess.TimeoutExpired):
-        return ""
+        import ctypes
+        import locale
+        langid = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+        return locale.windows_locale.get(langid, "0x%04x" % langid), (langid & 0x3FF) == 0x09
+    except (AttributeError, OSError, ValueError):
+        return None
+
+
+def system_info():
+    if IS_MAC:
+        return "macOS %s" % (platform.mac_ver()[0] or "?")
+    lang = display_language()
+    return "Windows %s%s" % (platform.version(), ", display language %s" % lang[0] if lang else "")
+
+
+def language_error(text):
+    lang = display_language()
+    return "%s%s: not English, which is not supported yet (the labels of netsh and ping are read in English). Output seen: %s" % (
+        UNSUPPORTED, " (%s)" % lang[0] if lang else "", snippet(text))
+
+
+def snippet(text, n=120):
+    """One short line of command output for an error message."""
+    return " ".join((text or "").split())[:n] or "no output"
+
+
+def run_cmd(cmd, timeout=10):
+    kw = {"creationflags": CREATE_NO_WINDOW} if IS_WIN else {}  # console tools get a hidden console, never a flashing window
+    try:
+        p = subprocess.run(cmd, capture_output=True, stdin=subprocess.DEVNULL, timeout=timeout, **kw)
+    except subprocess.TimeoutExpired:
+        return Cmd(error="%s timed out after %ss" % (cmd[0], timeout))
+    except OSError as e:
+        return Cmd(error="could not start %s: %s" % (cmd[0], e))
+    return Cmd(p.returncode, _decode(p.stdout), _decode(p.stderr))
+
+
+def run(cmd, timeout=10):
+    return run_cmd(cmd, timeout).out
 
 
 # ---------------------------------------------------------------- network basics
 
 def default_gateway():
+    """(gateway, None); (None, None) when there is no default route; (ERR, reason) when the lookup itself failed."""
     if IS_MAC:
-        m = re.search(r"gateway:\s*(\S+)", run(["route", "-n", "get", "default"]))
-        return m.group(1) if m else None
-    rows = re.findall(r"^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\S+)\s+\S+\s+(\d+)", run(["route", "print", "-4", "0.0.0.0"]), re.M)
-    rows = [r for r in rows if re.match(r"\d+\.\d+\.\d+\.\d+$", r[0])]
-    return min(rows, key=lambda r: int(r[1]))[0] if rows else None
+        r = run_cmd(["route", "-n", "get", "default"])
+        if r.error:
+            return ERR, r.error
+        m = re.search(r"gateway:\s*(\S+)", r.out)
+        return (m.group(1), None) if m else (None, None)
+    r = run_cmd(["route", "print", "-4", "0.0.0.0"])
+    if r.error:
+        return ERR, r.error
+    if not r.out.strip():
+        return ERR, "route exit %s with no output: %s" % (r.rc, snippet(r.err))
+    rows = re.findall(r"^\s*0\.0\.0\.0\s+0\.0\.0\.0\s+(\S+)\s+\S+\s+(\d+)", r.out, re.M)
+    rows = [x for x in rows if re.match(r"\d+\.\d+\.\d+\.\d+$", x[0])]
+    return (min(rows, key=lambda x: int(x[1]))[0], None) if rows else (None, None)
+
+
+PING_TIME = re.compile(r"[=<]\s*([\d.]+)\s*(?:ms|\u043c\u0441)")
+PING_STATS_WIN = re.compile(r"=\s*\d+,\s*[^=,]+=\s*(\d+),\s*[^=,]+=\s*\d+")  # Sent = 1, Received = 0, Lost = 1 (any language); group 1 = received
+PING_STATS_MAC = re.compile(r"\d+ packets transmitted, (\d+) (?:packets )?received")
+PING_UNREACHABLE = re.compile(r"unreachable|TTL expired", re.I)
+PING_FAILURE = re.compile(r"general failure|transmit failed", re.I)
 
 
 def ping(host):
-    """Round-trip time in ms, or None if the ping was lost."""
+    """(round-trip ms, None) for a reply; (None, None) for a ping that ran and got no reply (real loss);
+    (ERR, reason) when the ping itself could not be done, so it must not count as packet loss."""
     if not host:
-        return None
+        return None, None
     cmd = ["ping", "-n", "1", "-w", "1000", host] if IS_WIN else ["ping", "-c", "1", "-W", "1000", host]
-    m = re.search(r"time[=<]\s*([\d.]+)\s*ms", run(cmd, timeout=5))
-    return float(m.group(1)) if m else None
+    r = run_cmd(cmd, timeout=5)
+    if r.error:
+        return ERR, r.error
+    m = PING_TIME.search(r.out)
+    if m:
+        return float(m.group(1)), None
+    text = r.out + " " + r.err
+    if PING_FAILURE.search(text):
+        return ERR, "ping failed: %s" % snippet(text)
+    stats = (PING_STATS_WIN if IS_WIN else PING_STATS_MAC).search(r.out)
+    if stats:
+        if int(stats.group(1)) == 0 or PING_UNREACHABLE.search(text):
+            return None, None  # no reply, or only an "unreachable" answer: the target cannot be reached
+        if non_english(text):
+            return ERR, language_error(text)
+        return ERR, "ping got a reply but its time could not be read: %s" % snippet(text)
+    return ERR, "ping exit %s without a result: %s" % (r.rc, snippet(text))
 
 
 # ---------------------------------------------------------------- macOS (CoreWLAN helper)
@@ -72,7 +167,10 @@ def ensure_mac_helper():
 
 
 def mac_wifi():
-    out = run([HELPER_BIN], timeout=5).strip()
+    r = run_cmd([HELPER_BIN], timeout=5)
+    if r.error:
+        return {"error": r.error}
+    out = r.out.strip()
     if out == "NA":
         return {"assoc": False}
     try:
@@ -80,7 +178,7 @@ def mac_wifi():
         return {"assoc": True, "rssi": int(rssi), "noise": int(noise), "ch": int(ch), "band": band,
                 "width": width, "tx": tx, "phy": MAC_PHY[int(phy)] if int(phy) < len(MAC_PHY) else "?"}
     except ValueError:
-        return None
+        return {"error": "Wi-Fi helper exit %s, unexpected output: %s" % (r.rc, snippet(out + " " + r.err))}
 
 
 # ---------------------------------------------------------------- Windows (netsh)
@@ -104,12 +202,20 @@ def _win_band(kv_band, ch):
 
 
 def win_wifi():
-    kv = _kv(run(["netsh", "wlan", "show", "interfaces"]))
-    if not kv:
-        return None
-    sig = re.match(r"(\d+)", kv.get("signal", ""))
-    if kv.get("state", "").lower() != "connected" or not sig:
+    """Link details, {"assoc": False} for a real disconnect, or {"error": reason} when netsh gave nothing we can read."""
+    r = run_cmd(["netsh", "wlan", "show", "interfaces"])
+    if r.error:
+        return {"error": r.error}
+    kv = _kv(r.out)
+    if "state" not in kv:
+        if non_english(r.out) or kv:  # English output always has a "State" line, so labels in another language
+            return {"error": language_error(r.out)}
+        return {"error": "netsh exit %s, no interface state in its output: %s" % (r.rc, snippet(r.out + " " + r.err))}  # permission message, no adapter
+    if kv["state"].lower() != "connected":
         return {"assoc": False}
+    sig = re.match(r"(\d+)", kv.get("signal", ""))
+    if not sig:
+        return {"error": "netsh reports connected but gives no signal value: %s" % snippet(r.out)}
     ch = int(kv.get("channel", "0") or 0)
     return {"assoc": True, "rssi": round(int(sig.group(1)) / 2 - 100), "ch": ch,
             "band": _win_band(kv.get("band"), ch), "tx": kv.get("transmit rate (mbps)"),
@@ -152,6 +258,8 @@ def get_wifi(have_mac_helper):
 def format_wifi(w):
     if w is None:
         return ""
+    if "error" in w:
+        return " wifi=ERR"
     if not w["assoc"]:
         return " rssi=NA (not associated)"
     parts = ["rssi=%d" % w["rssi"]]
@@ -181,7 +289,29 @@ def do_scan(have_mac_helper):
 
 
 def ms(v):
-    return "LOST" if v is None else "%.3f" % v
+    return "LOST" if v is None else v if v == ERR else "%.3f" % v
+
+
+class ErrorTracker:
+    """Turns repeated measurement errors into one event, and the recovery into another, so a flapping fault does not flood the log."""
+    AFTER = 3  # consecutive failed samples before an error is announced
+
+    def __init__(self):
+        self.streak, self.announced = {}, {}
+
+    def update(self, what, reason):
+        """`reason` is None when the measurement worked. Returns the event text to log, if any."""
+        if reason is None:
+            self.streak[what] = 0
+            if self.announced.pop(what, False):
+                return "Measurement recovered: %s is being measured again" % what
+            return None
+        self.streak[what] = self.streak.get(what, 0) + 1
+        needed = 1 if reason.startswith(UNSUPPORTED) else self.AFTER  # a language problem will not fix itself, so say so at once
+        if self.streak[what] >= needed and not self.announced.get(what):
+            self.announced[what] = True
+            return "Measurement error: %s could not be measured (%s). Not counted as packet loss or a disconnect." % (what, reason)
+        return None
 
 
 def main():
@@ -196,10 +326,15 @@ def main():
         sys.exit("Unsupported platform: this collector supports macOS and Windows.")
     have_helper = ensure_mac_helper() if IS_MAC else False
     print("logging to %s (keeping %d days); Ctrl-C to stop" % (logstore.LOG_DIR, logstore.KEEP_DAYS))
+    print("system: %s" % system_info())
+    lang = display_language()
+    if lang and not lang[1]:
+        print("warning: the Windows display language is %s. Only English is supported yet, so Wi-Fi details will be "
+              "reported as measurement errors." % lang[0])
 
     pool = cf.ThreadPoolExecutor(max_workers=2)
-    gw, gw_at, last_day, next_scan = None, 0.0, None, 0.0
-    warned_no_wifi = False
+    gw, gw_reason, gw_at, last_day, next_scan = None, None, 0.0, None, 0.0
+    tracker = ErrorTracker()
     try:
         while True:
             start = time.time()
@@ -207,19 +342,22 @@ def main():
             if now.date() != last_day:
                 logstore.maintain(now.date())
                 last_day = now.date()
-            if gw is None or start - gw_at > 60:
-                gw, gw_at = default_gateway(), start
-            f_gw, f_net = pool.submit(ping, gw), pool.submit(ping, args.host)
+            if gw in (None, ERR) or start - gw_at > 60:
+                (gw, gw_reason), gw_at = default_gateway(), start
+            f_gw = pool.submit(ping, gw) if gw != ERR else None
+            f_net = pool.submit(ping, args.host)
             wifi = get_wifi(have_helper)
-            if IS_WIN and wifi is None and not warned_no_wifi:
-                warned_no_wifi = True
-                print("warning: `netsh wlan show interfaces` returned nothing usable, so only pings are logged. "
-                      "Check that Wi-Fi is on, that Location is enabled for desktop apps (Windows 11 24H2 and newer), "
-                      "and that the Windows display language is English.")
-            line = "%s gateway_ms=%s internet_ms=%s%s" % (
-                now.strftime("%Y-%m-%d %H:%M:%S"), ms(f_gw.result()), ms(f_net.result()), format_wifi(wifi))
+            gw_val, gw_err = f_gw.result() if f_gw else (ERR, gw_reason)
+            net_val, net_err = f_net.result()
+            line = "%s gateway_ms=%s internet_ms=%s%s" % (now.strftime("%Y-%m-%d %H:%M:%S"), ms(gw_val), ms(net_val), format_wifi(wifi))
             logstore.append("monitor", line, now)
             print(line, flush=True)
+            for what, reason in (("router ping", gw_err), ("internet ping", net_err),
+                                 ("Wi-Fi status", wifi.get("error") if wifi else None)):
+                event = tracker.update(what, reason)
+                if event:
+                    logstore.append("monitor", "%s EVENT %s" % (now.strftime("%Y-%m-%d %H:%M:%S"), event), now)
+                    print(event, flush=True)
             if logstore.read_control()["scan_paused"]:
                 next_scan = start + args.scan_every  # on resume, wait a full interval before scanning
             elif args.scan_every and start >= next_scan:
