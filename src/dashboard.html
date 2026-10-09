@@ -224,7 +224,7 @@ const TIPS = {
   events: "A timeline of outages, channel or band changes, gaps where nothing was logged, and your own notes. Type a note when you change something (the quick buttons start a note for you) so you can compare before and after.",
   daily: "One row per day of logs. Click a row to open that day. Orange and red cells flag high loss, slow pings, or outages.",
   evcount: "How many things happened in the current view: outages (router and internet both unreachable, or Wi-Fi disconnected), channel or band changes, and notes you added. The Events card lists them with times.",
-  avail: "Share of observed time you were connected and reachable. Time with no data (computer asleep, collector off) is not counted either way. 99.5% or more is healthy. The second line shows the longest single outage.",
+  avail: "Share of observed time that both your router and the internet answered. A moment counts as unavailable when either ping is lost or Wi-Fi is disconnected. Time with no data (computer asleep, collector off) is not counted either way. 99.5% or more is healthy. The second line shows the router and internet shares on their own, and the longest continuous stretch when either was unavailable. A lower internet share with a healthy router share points beyond your Wi-Fi.",
   jitter: "How much the internet ping changes from one sample to the next. Calls need steady delivery: under 10 ms is good, and above 30 ms causes choppy audio and video even when the average ping looks fine. The second line shows the 95th percentile.",
   callready: "Share of samples good enough for a video call: router ping under 50 ms, internet ping under 150 ms, nothing lost, and signal-to-noise of at least 20 dB (when the system reports it). Worst stretch is the longest unbroken run of samples that were not ready.",
   d_day: "The calendar day of the log file.",
@@ -344,7 +344,7 @@ FIX.evcount = {
 FIX.avail = {
   you: ["Restart the router and check power and network cables.", "Avoid Wi-Fi power saving and keep the computer awake during calls.", "If dips line up with channel or band changes, fix the hopping first."],
   router: ["Look in the router's own log for reboots, and update or replace it if it restarts by itself."],
-  isp: "Availability dips that hit both the router and the internet usually come from the router or the line. Report them to your ISP together with the Daily summary." };
+  isp: "A lower internet share with a healthy router share points to the ISP or the line. Dips on both usually come from the router or Wi-Fi. Report them to your ISP together with the Daily summary." };
 FIX.jitter = {
   you: ["Use Ethernet for important calls.", "Pause uploads, backups and streaming on the network during calls.", "Improve signal and use 5 GHz close to the router. A steady link means steady delivery."],
   router: ["Turn on QoS or smart queue (SQM). It reduces jitter caused by bulk traffic.", "Move to a less crowded channel."],
@@ -461,18 +461,24 @@ function analyzeSpikes(rows, markers) {
 }
 
 // Headline quality numbers for the tile row
+const fmtAvail = v => v >= 99.95 ? '100' : v.toFixed(1);
 function qualityStats(rows, xmin, xmax) {
   const mk = buildMarkers(rows).filter(m => m.x >= xmin && m.x <= xmax);
   const outages = mk.filter(m => m.kind === 'outage'), changes = mk.filter(m => m.type === 'changes').length, noteN = mk.filter(m => m.type === 'notes').length;
   const longest = outages.reduce((a, m) => Math.max(a, m.x1 - m.x), 0);
-  // availability: observed time only (gaps with no data are skipped); a sample counts as down when router and internet are both lost, or Wi-Fi is disconnected
-  let seen = 0, down = 0, jit = [];
+  // availability: observed time only (gaps with no data are skipped). A sample counts as unavailable when the router OR the internet
+  // ping is lost, or Wi-Fi is disconnected; the router and internet shares are also tracked on their own.
+  let seen = 0, down = 0, gwDown = 0, netDown = 0, run = 0, longestDown = 0, jit = [];
   const gaps = [];
   for (let i = 0; i + 1 < rows.length; i++) {
     const a = rows[i], b = rows[i + 1], dt = b.x - a.x;
+    if (dt > GAP_MS) run = 0;
     if (dt <= GAP_MS) {
       seen += dt; gaps.push(dt);
-      if ((a.gwLost && a.netLost) || a.assoc === false) down += dt;
+      const off = a.assoc === false, gwBad = a.gwLost || off, netBad = a.netLost || off;
+      if (gwBad) gwDown += dt;
+      if (netBad) netDown += dt;
+      if (gwBad || netBad) { down += dt; run += dt; longestDown = Math.max(longestDown, run); } else run = 0;
       if (a.net != null && b.net != null) jit.push(Math.abs(b.net - a.net));
     }
   }
@@ -487,7 +493,7 @@ function qualityStats(rows, xmin, xmax) {
   }
   return {
     outages: outages.length, changes, notes: noteN, longest,
-    avail: seen ? 100 * (1 - down / seen) : null,
+    avail: seen ? 100 * (1 - down / seen) : null, availGw: seen ? 100 * (1 - gwDown / seen) : null, availNet: seen ? 100 * (1 - netDown / seen) : null, longestDown,
     jitter: jit.length ? jit.reduce((x, y) => x + y, 0) / jit.length : null, jitterP95: pct(jit, .95),
     call: rows.length ? 100 * ok / rows.length : null, worst: ok === rows.length ? 0 : worst,
   };
@@ -660,7 +666,7 @@ function render() {
     tile('Channel', last && last.ch != null ? `${last.ch}` : 'n/a', last && last.ch != null ? [`${last.band} GHz`, last.width != null ? `${last.width} MHz` : null, last.phy ? `802.${last.phy}` : null].filter(Boolean).join(' · ') : ''),
     tile('Tx rate', last && last.tx != null ? last.tx + ' Mbps' : 'n/a', ''),
     tile('Events', rows.length ? evTotal : 'n/a', rows.length ? `${plural(q.outages, 'outage')} · ${plural(q.changes, 'channel change')} · ${plural(q.notes, 'note')}` : '', q.outages ? css('--bad') : q.changes >= 3 ? css('--warn') : css('--good')),
-    tile('Availability', q.avail == null ? 'n/a' : (q.avail >= 99.95 ? '100' : q.avail.toFixed(1)) + '%', q.avail == null ? '' : q.longest ? `longest outage ${fmtDur(q.longest / 1000)}` : 'no outages', q.avail == null ? '' : q.avail >= 99.5 ? css('--good') : q.avail >= 98 ? css('--warn') : css('--bad')),
+    tile('Availability', q.avail == null ? 'n/a' : fmtAvail(q.avail) + '%', q.avail == null ? '' : `router ${fmtAvail(q.availGw)}% · internet ${fmtAvail(q.availNet)}%` + (q.longestDown ? ` · longest drop ${fmtDur(q.longestDown / 1000)}` : ''), q.avail == null ? '' : q.avail >= 99.5 ? css('--good') : q.avail >= 98 ? css('--warn') : css('--bad')),
     tile('Jitter', q.jitter == null ? 'n/a' : f1(q.jitter) + ' ms', q.jitter == null ? '' : `p95 ${f1(q.jitterP95)} ms`, q.jitter == null ? '' : q.jitter < 10 ? css('--good') : q.jitter <= 30 ? css('--warn') : css('--bad')),
     tile('Call-ready', q.call == null ? 'n/a' : q.call.toFixed(0) + '%', q.call == null ? '' : q.worst ? `worst stretch ${fmtDur(q.worst / 1000)}` : 'no bad stretches', q.call == null ? '' : q.call >= 95 ? css('--good') : q.call >= 85 ? css('--warn') : css('--bad')),
   ].join('') + '<span id="crowdtile" style="display:contents"></span>';
