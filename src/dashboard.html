@@ -45,7 +45,7 @@
   #cLat, #cSig, #cSnr { touch-action: pan-y; cursor: crosshair; }
   .nodata { margin: 0 0 8px; padding: 6px 10px; border-radius: 8px; background: var(--bg); color: var(--muted); font-size: 12.5px; }
   .nodata[hidden] { display: none; }
-  .rangeline { margin: -2px 0 6px; color: var(--muted); font-size: 12px; }
+  .rangeline, .probeline { margin: -2px 0 6px; color: var(--muted); font-size: 12px; }  /* .probeline is not rewritten by updateRangeLabels, which fills every .rangeline with the chart range */
   #selpanel { margin-top: 12px; padding: 10px 12px; border: 1px solid var(--c1); border-radius: 10px; background: var(--bg); }
   #selpanel[hidden] { display: none; }
   #selpanel .selhead { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -91,13 +91,12 @@
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--text); font: 14px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 32px; }
-  header { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+  header { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 10px 14px; margin-bottom: 16px; }
   .brand { display: inline-flex; align-items: center; gap: 10px; }
   .logo { flex: none; display: block; }
   h1 { font-size: 20px; margin: 0; font-weight: 650; }
   .pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; font-weight: 600; font-size: 13px; background: var(--card); border: 1px solid var(--line); }
   .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
-  .spacer { flex: 1; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--card); }
   .seg button { border: 0; background: transparent; color: var(--muted); padding: 5px 12px; font: inherit; cursor: pointer; }
   .seg button.on { background: var(--c1); color: #fff; }
@@ -110,6 +109,24 @@
   label.switch input:focus-visible + .track { outline: 2px solid var(--c1); outline-offset: 2px; }
   select.day { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 8px; padding: 5px 8px; font: inherit; max-width: 100%; }
   .seg.dim button.on { background: transparent; color: var(--muted); }
+  .ctl[hidden], .collbody[hidden], .probessum[hidden] { display: none; }  /* .ctl's display would otherwise override the hidden attribute */
+  :root { --ctlh: 32px; }
+  .pill, label.switch, .themebtn, select.day, .seg, .seg button { min-height: var(--ctlh); }
+  .pill, label.switch, .themebtn { display: inline-flex; align-items: center; }
+  .seg button { height: var(--ctlh); padding-block: 0; }
+  .ctl > .hint, .pill > .hint { flex: none; margin-left: 6px; }
+  h1 { white-space: nowrap; }
+  @media (max-width: 600px) { header { gap: 8px 10px; } .brand { flex: 0 0 100%; justify-content: center; } }
+  .collh { display: flex; align-items: center; gap: 6px; cursor: pointer; }
+  .collh .hint { margin-left: 0; }
+  .collbtn { flex: none; width: 24px; height: 24px; padding: 0; display: inline-flex; align-items: center; justify-content: center; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 6px; cursor: pointer; }
+  .collbtn:hover, .collbtn:focus-visible { border-color: var(--c1); color: var(--c1); }
+  .collbtn:focus-visible { outline: 2px solid var(--c1); outline-offset: 2px; }
+  .collbtn svg { transition: transform .15s; transform: rotate(-90deg); }
+  .collbtn[aria-expanded="true"] svg { transform: rotate(0); }
+  @media (prefers-reduced-motion: reduce) { .collbtn svg { transition: none; } }
+  .card.collapsed h2 { margin-bottom: 4px; }
+  .probessum { margin: 0 0 2px 30px; padding-right: 40px; }
   .tablewrap { overflow-x: auto; }
   table.days { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
   table.days th { text-align: right; font-weight: 600; font-size: 12px; color: var(--muted); padding: 4px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
@@ -156,7 +173,6 @@
   <header>
     <span class="brand"><svg class="logo" viewBox="0 0 32 32" width="30" height="30" role="img" aria-label="Wi-Fi Monitor logo"><rect width="32" height="32" rx="7" fill="var(--c1)"/><path d="M6.1 12.1A14 14 0 0 1 25.9 12.1M9.64 15.64A9 9 0 0 1 22.36 15.64M12.82 18.82A4.5 4.5 0 0 1 19.18 18.82" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round"/><circle cx="16" cy="23.5" r="1.9" fill="#fff"/></svg><h1>Wi-Fi Monitor</h1></span>
     <span class="pill"><span class="dot" id="dot"></span><span id="status">Loading…</span><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="status">i</span></span>
-    <span class="spacer"></span>
     <span class="ctl"><label class="switch" title="Nearby-network scans briefly leave your channel and can cost a lost ping. Turn off during important calls."><input type="checkbox" id="scanSwitch" checked><span class="track"></span><span id="scanLabel">Scanning on</span></label><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="scan">i</span></span>
     <span class="ctl"><select class="day" id="day" title="View a past day"><option value="">Live</option></select><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="day">i</span></span>
     <span class="ctl"><div class="seg" id="win">
@@ -191,11 +207,16 @@
       <div class="chips" id="chips"></div>
       <div id="evmsg"></div>
       <ul class="events" id="events"></ul></div>
-    <div class="card full"><h2>What this app measures — probes and how often<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="probes">i</span></h2>
-      <div class="rangeline" id="probestatus"></div>
+    <div class="card full collapsed" id="probesCard">
+      <h2 class="collh" id="probesHead">
+        <button type="button" class="collbtn" id="probesToggle" aria-expanded="false" aria-controls="probesPanel" aria-labelledby="probesTitle"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg></button>
+        <span class="ttl" id="probesTitle">Probes settings</span><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="probes">i</span></h2>
+      <div class="probeline probessum" id="probesSummary">Loading…</div>
+      <div class="collbody" id="probesPanel" hidden>
+      <div class="probeline" id="probestatus"></div>
       <div class="tablewrap"><table class="days probes"><thead><tr>
         <th class="l">Probe</th><th class="l">What it checks</th><th class="l">Target and method</th><th>Every</th><th>Last run</th><th class="l">Last result</th><th class="l">Network use</th>
-      </tr></thead><tbody id="probesbody"><tr><td colspan="7" style="color:var(--muted)">Loading…</td></tr></tbody></table></div></div>
+      </tr></thead><tbody id="probesbody"><tr><td colspan="7" style="color:var(--muted)">Loading…</td></tr></tbody></table></div></div></div>
     <div class="card full"><h2>Daily summary — click a day to open it<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="daily">i</span></h2>
       <div class="tablewrap"><table class="days"><thead><tr>
         <th>Day<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_day">i</span></th><th>Samples<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_samples">i</span></th><th>Router loss<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_gwloss">i</span></th><th>Internet loss<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_netloss">i</span></th><th>Router p95<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_gwp95">i</span></th><th>Internet p95<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_netp95">i</span></th>
@@ -220,7 +241,7 @@ const TIPS = {
   scan: "Pauses or resumes the nearby-network scans. A scan briefly leaves your channel and can cost a lost ping, so turn it off before important calls. Pings and signal keep being recorded either way.",
   stop: "Stops the background service: the collector and this dashboard both end, and your logs are kept. This page cannot start it again. To start: run ./service.sh start (macOS) or service.bat start (Windows) from the project folder. Use ./service.sh open to start it and open this page, or install to start it automatically at every login (uninstall turns that off). The button only appears when the service started this page. If you started with start.sh or start.bat, press Ctrl-C in that window instead.",
   refresh: "How often this page reloads its data from the local server. Pick a longer time to save battery, or Paused to freeze the page while you read it (the footer then offers Refresh now). The collector keeps taking samples either way: how often it samples is the Every column of the probes table, set with --interval. Refreshing faster than that shows nothing new. Your choice is remembered in this browser.",
-  probes: "Everything the collector measures, how often, and what it costs. Use the menus in the Every column to retime the probes: the router, internet and Wi-Fi probes share one sampling interval (2 to 15 s), and scans run every 5 min to 1 h or not at all. A change applies within a few seconds, is noted in the Events card, and stays until you change it again; \"start-up value\" returns to the --interval and --scan-every flags. Slower sampling than 15 s is not offered because the charts treat longer silences as missing data. Pings go only to your router and the internet target, about 100 bytes each. Wi-Fi status and scans are read from your own adapter and use no internet traffic. Last run and Last result come from the latest logged sample, so a stale time means the collector is not running. The Dashboard refresh row is this page's own setting, in the header.",
+  probes: "Everything the collector measures, how often, and what it costs. The card starts collapsed: use the arrow or click the title to open it. The summary line shows the current settings. Use the menus in the Every column to retime the probes: the router, internet and Wi-Fi probes share one sampling interval (2 to 15 s), and scans run every 5 min to 1 h or not at all. A change applies within a few seconds, is noted in the Events card, and stays until you change it again; \"start-up value\" returns to the --interval and --scan-every flags. Slower sampling than 15 s is not offered because the charts treat longer silences as missing data. Pings go only to your router and the internet target, about 100 bytes each. Wi-Fi status and scans are read from your own adapter and use no internet traffic. Last run and Last result come from the latest logged sample, so a stale time means the collector is not running. The Dashboard refresh row is this page's own setting, in the header.",
   day: "Live shows a rolling window of recent data. Pick a day to see that whole day from the saved logs. Live refresh pauses for past days.",
   window: "How much recent history the charts and tiles cover in live view. Choosing one returns you from a past day to live view.",
   theme: "Cycles Auto (follows your system), Light and Dark. Remembered in this browser.",
@@ -913,6 +934,7 @@ function renderProbes() {
     ? `Collector running${c.pid ? ` (pid ${c.pid})` : ''}${c.started ? `, started ${c.started}` : ''}${c.system ? ` · ${c.system}` : ''}${c.settingsKnown ? '' : ' · intervals inferred from the log (restart the collector to read its exact settings)'}`
     : `Collector not running (last sample ${c && c.lastSample || 'never'}). The table shows the last known settings.`;
   if (probeMsg) $('#probestatus').textContent += ` · ${probeMsg}`;
+  $('#probesSummary').textContent = probesSummary(probeData);
   if (document.activeElement && document.activeElement.tagName === 'SELECT' && body.contains(document.activeElement)) return;  // do not close a menu the user is using
   body.innerHTML = probeRows().map(p => {
     const stale = p.ago != null && p.every && p.ago > Math.max(30, 4 * p.every);
@@ -923,6 +945,25 @@ function renderProbes() {
       + `<td class="l state-${p.state}">${escHtml(p.result)}</td><td class="l">${escHtml(p.traffic)}</td></tr>`;
   }).join('');
 }
+
+// ---- the Probes settings card is collapsed by default; its state is remembered in the browser
+const PROBES_KEY = 'probesOpen'; let probesOpen = false; try { probesOpen = localStorage.getItem(PROBES_KEY) === '1'; } catch (e) { /* storage blocked */ }
+function setProbesOpen(open, save) {
+  probesOpen = open;
+  $('#probesPanel').hidden = !open; $('#probesSummary').hidden = open;
+  $('#probesToggle').setAttribute('aria-expanded', String(open));
+  $('#probesCard').classList.toggle('collapsed', !open);
+  if (save) { try { localStorage.setItem(PROBES_KEY, open ? '1' : '0'); } catch (e) { /* storage blocked */ } }
+}
+function probesSummary(d) {
+  if (!d) return 'Loading…';
+  const c = d.collector || {}, ps = d.probes || [];
+  if (!c.running) return `Collector not running (last sample ${c.lastSample || 'never'})`;
+  const router = ps.find(p => p.id === 'router') || {}, scan = ps.find(p => p.id === 'scan') || {};
+  return `Collector running · router/internet/Wi-Fi every ${router.everyText || '?'} · ${scan.every ? 'scan every ' + scan.everyText : 'scans off'}`;
+}
+$('#probesHead').addEventListener('click', e => { if (e.target.closest('.hint')) return; hideTip(); setProbesOpen(!probesOpen, true); });
+setProbesOpen(probesOpen, false);
 
 const CHIPS = ['Changed router setting', 'Reconnected to Wi-Fi', 'Switched network', 'Moved location', 'Joined call', 'Left call', 'Restarted router'];
 $('#chips').innerHTML = CHIPS.map(c => `<button type="button">${c}</button>`).join('');
