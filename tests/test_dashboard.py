@@ -217,6 +217,34 @@ class PageIntegrityTests(unittest.TestCase):
                 self.assertIn(needle, self.html)
 
 
+class CompactTableTests(unittest.TestCase):
+    """The Daily summary and Probes settings tables are compact so they fit without a sideways scroller on normal screens."""
+
+    def setUp(self):
+        with open(HTML, encoding="utf-8") as f:
+            self.html = f.read()
+
+    def test_only_the_two_tables_are_compact(self):
+        tables = re.findall(r'<table class="([^"]*)"', self.html)
+        compact = [c for c in tables if "compact" in c.split()]
+        self.assertEqual(sorted(compact), ["days compact", "days probes compact"])
+        # the "likely cause" analysis table keeps its own look
+        self.assertIn('<table class="days spikes">', self.html)  # built in JS, so it is not in the `tables` list above
+
+    def test_compact_rules_let_headers_and_notes_wrap(self):
+        self.assertRegex(self.html, r"table\.compact th \{[^}]*white-space: normal")
+        self.assertRegex(self.html, r"table\.compact td \{[^}]*padding: 5px 5px")
+        # the Every column holds a note inside a nowrap cell; without this it forces the table about 370 px wide
+        self.assertRegex(self.html, r"table\.probes\.compact \.note \{[^}]*white-space: normal")
+        self.assertRegex(self.html, r"table\.probes\.compact td:nth-child\(4\) \{ max-width: 150px; \}")
+
+    def test_narrow_screens_get_an_even_tighter_table(self):
+        self.assertRegex(self.html, r"@media \(max-width: 800px\) \{ table\.compact \{ font-size: 11\.5px; \}")
+
+    def test_the_scroll_fallback_is_kept_for_very_narrow_screens(self):
+        self.assertRegex(self.html, r"\.tablewrap \{ overflow-x: auto; \}")
+
+
 @unittest.skipUnless(NODE, "Node.js is not installed")
 class RefreshAndProbesTests(unittest.TestCase):
     def setUp(self):

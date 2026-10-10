@@ -133,6 +133,18 @@
   table.days td { text-align: right; padding: 6px 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
   table.days th:first-child, table.days td:first-child, table.days th.l, table.days td.l { text-align: left; }
   table.days td.l { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+  /* compact: smaller type and padding, headers and first column may wrap, so the Daily summary and Probes settings tables fit without a sideways scroller */
+  table.compact { font-size: 12px; }
+  table.compact th { padding: 4px 5px; white-space: normal; line-height: 1.25; vertical-align: bottom; }
+  table.compact td { padding: 5px 5px; }
+  table.compact th:first-child, table.compact td:first-child { white-space: normal; }
+  table.compact th .hint { margin-left: 3px; }
+  table.compact td.l { max-width: 150px; }
+  table.probes.compact td.l { min-width: 80px; max-width: 170px; }
+  table.probes.compact .note { font-size: 11px; line-height: 1.3; white-space: normal; }  /* td is nowrap, so the Every note must opt back in to wrapping */
+  table.probes.compact td:nth-child(4) { max-width: 150px; }
+  table.probes.compact select.every { max-width: 140px; font-size: 12px; }
+  @media (max-width: 800px) { table.compact { font-size: 11.5px; } table.compact td.l { max-width: 110px; } table.probes.compact td.l { max-width: 140px; } }
   table.days tbody tr { cursor: pointer; }
   table.days tbody tr:hover { background: var(--bg); }
   table.days tbody tr.sel { background: var(--bg); box-shadow: inset 3px 0 0 var(--c1); }
@@ -214,11 +226,11 @@
       <div class="probeline probessum" id="probesSummary">Loading…</div>
       <div class="collbody" id="probesPanel" hidden>
       <div class="probeline" id="probestatus"></div>
-      <div class="tablewrap"><table class="days probes"><thead><tr>
+      <div class="tablewrap"><table class="days probes compact"><thead><tr>
         <th class="l">Probe</th><th class="l">What it checks</th><th class="l">Target and method</th><th>Every</th><th>Last run</th><th class="l">Last result</th><th class="l">Network use</th>
       </tr></thead><tbody id="probesbody"><tr><td colspan="7" style="color:var(--muted)">Loading…</td></tr></tbody></table></div></div></div>
     <div class="card full"><h2>Daily summary — click a day to open it<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="daily">i</span></h2>
-      <div class="tablewrap"><table class="days"><thead><tr>
+      <div class="tablewrap"><table class="days compact"><thead><tr>
         <th>Day<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_day">i</span></th><th>Samples<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_samples">i</span></th><th>Router loss<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_gwloss">i</span></th><th>Internet loss<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_netloss">i</span></th><th>Router p95<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_gwp95">i</span></th><th>Internet p95<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_netp95">i</span></th>
         <th>Outage<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_outage">i</span></th><th>Band/ch changes<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_changes">i</span></th><th>Avg RSSI<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_rssi">i</span></th><th>Avg SNR<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_snr">i</span></th><th class="l">Notes<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_notes">i</span></th>
       </tr></thead><tbody id="daysbody"><tr><td colspan="11" style="color:var(--muted)">Loading…</td></tr></tbody></table></div></div>
