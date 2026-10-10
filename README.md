@@ -1,4 +1,4 @@
-# WiFiMonitor
+# Wi-Fi Monitor
 
 Find out why your Wi-Fi drops during Zoom and Teams calls. WiFiMonitor records router and internet latency, signal quality, channel and band, and how crowded your channel is, then shows it all on a live dashboard so you can line up bad moments with their cause.
 
