@@ -110,6 +110,27 @@ def write_control(**changes):
     return ctl
 
 
+INFO_FILE = os.path.join(LOG_DIR, "collector.json")
+
+
+def write_info(info):
+    """The collector's own settings (interval, scan period, target, gateway...), so the dashboard can show what really runs."""
+    os.makedirs(LOG_DIR, exist_ok=True)
+    tmp = INFO_FILE + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(info, f)
+    os.replace(tmp, INFO_FILE)
+
+
+def read_info():
+    try:
+        with open(INFO_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
 def read_day(kind, day):
     """All lines for one day ('YYYY-MM-DD'), or [] if there is no file for it."""
     for d, path in list_files(kind):

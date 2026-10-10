@@ -41,6 +41,14 @@ def err(i, which, **kw):
     return row(i, **d)
 
 
+def helpers(calls):
+    r = subprocess.run([NODE, HARNESS, HTML], input=json.dumps({"rows": [], "notes": [], "merrs": [], "scans": [], "xmin": 0, "xmax": 1, "calls": calls}),
+                       capture_output=True, text=True)
+    if r.returncode:
+        raise AssertionError(r.stderr)
+    return json.loads(r.stdout)["calls"]
+
+
 def analyse(rows, notes=(), merrs=(), scans=()):
     payload = {"rows": rows, "notes": list(notes), "merrs": list(merrs), "scans": list(scans),
                "xmin": rows[0]["x"] if rows else T0, "xmax": rows[-1]["x"] + 1 if rows else T0 + 1}
@@ -163,6 +171,36 @@ class PageIntegrityTests(unittest.TestCase):
                        'data-tip-key="stop"', 'id="stopBtn"'):
             with self.subTest(needle):
                 self.assertIn(needle, self.html)
+
+
+@unittest.skipUnless(NODE, "Node.js is not installed")
+class RefreshAndProbesTests(unittest.TestCase):
+    def setUp(self):
+        with open(HTML, encoding="utf-8") as f:
+            self.html = f.read()
+
+    def test_refresh_selector_offers_the_expected_choices_and_defaults_to_5s(self):
+        sel = re.search(r'<select[^>]*id="refreshSel".*?</select>', self.html, re.S).group(0)
+        self.assertEqual(re.findall(r'<option value="(\d+)"', sel), ["2", "5", "10", "30", "60", "0"])
+        self.assertIn("let refreshSec = 5;", self.html)
+
+    def test_refresh_uses_the_selected_interval_not_a_fixed_one(self):
+        self.assertIn("refreshSec * 1000", self.html)
+        self.assertNotIn("}, 5000);", self.html)
+        self.assertIn("localStorage.setItem('refreshSec'", self.html)
+        self.assertIn("window.stopped", self.html)  # still stops after the service is stopped
+
+    def test_probes_card_is_wired(self):
+        for needle in ('id="probesbody"', 'id="probestatus"', 'data-tip-key="probes"', "/api/probes", "Dashboard refresh", "probes: () =>"):
+            with self.subTest(needle):
+                self.assertIn(needle, self.html)
+
+    def test_formatting_helpers(self):
+        out = helpers([["fmtEvery", [0]], ["fmtEvery", [5]], ["fmtEvery", [60]], ["fmtEvery", [900]], ["fmtEvery", [5400]],
+                       ["fmtAgo", [None]], ["fmtAgo", [0]], ["fmtAgo", [12]], ["fmtAgo", [150]], ["fmtAgo", [7300]],
+                       ["refreshLabel", [2]], ["refreshLabel", [60]], ["escHtml", ['<b a="1">&']]])
+        self.assertEqual(out, ["off", "5 s", "1 min", "15 min", "1.5 h", "–", "just now", "12 s ago", "2 min ago", "2 h ago",
+                               "2s", "1 min", "&lt;b a=&quot;1&quot;&gt;&amp;"])
 
 
 if __name__ == "__main__":

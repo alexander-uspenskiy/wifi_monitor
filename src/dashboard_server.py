@@ -207,6 +207,119 @@ def read_scans(day=None):
     return out
 
 
+def every_text(sec):
+    if not sec:
+        return "off"
+    if sec < 60:
+        return f"{sec:g} s"
+    if sec < 3600:
+        return f"{sec / 60:g} min"
+    return f"{sec / 3600:g} h"
+
+
+def _ago(ts, now):
+    try:
+        return max(0, int((now - dt.datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")).total_seconds()))
+    except (TypeError, ValueError):
+        return None
+
+
+def build_probes(info, control, row, step, scan, now=None, win=None):
+    """The table of what the collector measures and how often. `info` is the collector's own settings file (may be empty),
+    `row` the latest parsed sample, `step` the typical spacing of samples, `scan` (timestamp, networks) of the last scan."""
+    now = now or dt.datetime.now()
+    win = sys.platform.startswith("win") if win is None else win
+    interval = info.get("interval") or step or 5
+    scan_every = info.get("scan_every", 900)
+    host = info.get("host") or "1.1.1.1"
+    gateway = info.get("gateway")
+    last = row["t"] if row else None
+    age = _ago(last, now) if last else None
+    running = age is not None and age <= max(30, 4 * interval)
+    ping = "ping -n 1 -w 1000 %s" if win else "ping -c 1 -W 1000 %s"
+
+    def ping_result(ms, lost, err):
+        if row is None:
+            return "no data yet", "off"
+        if err:
+            return "ERR (could not be measured)", "warn"
+        if lost:
+            return "LOST", "bad"
+        return ("%.1f ms" % ms, "ok") if ms is not None else ("no data", "off")
+
+    gw_res, gw_state = ping_result(row and row["gw"], row and row["gwLost"], row and row["gwErr"])
+    net_res, net_state = ping_result(row and row["net"], row and row["netLost"], row and row["netErr"])
+    if row is None:
+        wifi_res, wifi_state = "no data yet", "off"
+    elif row["wifiErr"]:
+        wifi_res, wifi_state = "ERR (could not be read)", "warn"
+    elif not row["assoc"]:
+        wifi_res, wifi_state = "not associated", "bad"
+    elif row["rssi"] is None:
+        wifi_res, wifi_state = "no Wi-Fi details logged", "off"
+    else:
+        wifi_res = "%.0f dBm" % row["rssi"] + (" · SNR %.0f dB" % row["snr"] if row["snr"] is not None else "") + \
+            (" · ch %.0f (%s GHz)" % (row["ch"], row["band"]) if row["ch"] is not None else "")
+        wifi_state = "ok"
+    paused = bool(control.get("scan_paused"))
+    if not scan_every:
+        scan_res, scan_state, scan_every_text = "scanning is off (--scan-every 0)", "off", "off"
+    elif paused:
+        scan_res, scan_state, scan_every_text = "paused with the Scanning switch", "off", every_text(scan_every) + " (paused)"
+    else:
+        scan_res, scan_state, scan_every_text = ("%d networks" % scan[1] if scan else "no scan yet"), ("ok" if scan else "off"), every_text(scan_every)
+
+    probes = [
+        {"id": "router", "name": "Router ping", "what": "Is the router (first hop) answering, and how fast",
+         "target": gateway or "default gateway", "method": "ICMP echo x1, 1 s timeout (" + ping % (gateway or "<router>") + ")",
+         "every": interval, "everyText": every_text(interval), "last": last, "ago": age, "result": gw_res, "state": gw_state,
+         "traffic": "about 100 bytes per probe, to your router only"},
+        {"id": "internet", "name": "Internet ping", "what": "Is the internet reachable through the router, and how fast",
+         "target": host, "method": "ICMP echo x1, 1 s timeout (" + ping % host + ")",
+         "every": interval, "everyText": every_text(interval), "last": last, "ago": age, "result": net_res, "state": net_state,
+         "traffic": "about 100 bytes per probe, to " + host},
+        {"id": "wifi", "name": "Wi-Fi link status", "what": "Signal, noise, channel, band and link rate of your connection",
+         "target": "this computer's Wi-Fi adapter",
+         "method": "netsh wlan show interfaces" if win else "CoreWLAN helper (bin/wifi-info)",
+         "every": interval, "everyText": every_text(interval), "last": last, "ago": age, "result": wifi_res, "state": wifi_state,
+         "traffic": "none (read locally)"},
+        {"id": "gateway", "name": "Gateway lookup", "what": "Finds your router's address",
+         "target": "this computer's routing table", "method": "route print -4 0.0.0.0" if win else "route -n get default",
+         "every": 60, "everyText": "1 min", "note": "also on every sample while the router is unknown or the lookup failed",
+         "last": None, "ago": None, "result": gateway or "unknown", "state": "ok" if gateway else "off", "traffic": "none (read locally)"},
+        {"id": "scan", "name": "Nearby-network scan", "what": "How many networks share your channel, and which channels are quietest",
+         "target": "Wi-Fi networks in range",
+         "method": "netsh wlan show networks mode=bssid" if win else "CoreWLAN helper scan (bin/wifi-info scan)",
+         "every": scan_every or None, "everyText": scan_every_text, "last": scan[0] if scan else None, "ago": _ago(scan[0], now) if scan else None,
+         "result": scan_res, "state": scan_state, "traffic": "none to the internet; the radio briefly leaves your channel, which can cost a ping"},
+        {"id": "maintain", "name": "Log maintenance", "what": "Compresses older day files and deletes files past the retention period",
+         "target": "the logs folder", "method": "local file operations", "every": None, "everyText": "at start and each new day",
+         "last": None, "ago": None, "result": "keeps %d days" % logstore.KEEP_DAYS, "state": "ok", "traffic": "none"},
+    ]
+    return {"collector": {"running": running, "pid": info.get("pid") if running else None, "started": info.get("started"),
+                          "system": info.get("system"), "settingsKnown": bool(info), "lastSample": last, "ago": age},
+            "probes": probes}
+
+
+def read_probes():
+    rows = read_rows()[-60:]
+    step = None
+    if len(rows) > 2:
+        t = [_secs(r["t"]) for r in rows]
+        gaps = sorted(b - a for a, b in zip(t, t[1:]) if 0 < b - a <= 60)
+        step = gaps[len(gaps) // 2] if gaps else None
+    scan = None
+    for line in reversed(logstore.read_lines("scan", 5)):
+        m = LINE.match(line.strip())
+        if m:
+            try:
+                scan = (m.group(1), len(json.loads(m.group(2)).get("nets", [])))
+                break
+            except ValueError:
+                continue
+    return build_probes(logstore.read_info(), logstore.read_control(), rows[-1] if rows else None, step, scan)
+
+
 def note_event(text):
     when = dt.datetime.now()
     logstore.append("monitor", f"{when:%Y-%m-%d %H:%M:%S} EVENT {text}", when)
@@ -235,6 +348,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(read_scans(day)).encode(), "application/json")
         elif path == "/api/control":
             self._send(200, json.dumps(logstore.read_control()).encode(), "application/json")
+        elif path == "/api/probes":
+            self._send(200, json.dumps(read_probes()).encode(), "application/json")
         elif path == "/api/service":
             # controllable only when the supervisor in service.py started this server
             self._send(200, json.dumps({"controllable": bool(os.environ.get("WIFI_SERVICE"))}).encode(), "application/json")

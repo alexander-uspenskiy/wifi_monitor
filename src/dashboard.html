@@ -79,6 +79,10 @@
   .themebtn { border: 1px solid var(--line); background: var(--card); color: var(--text); border-radius: 999px; padding: 3px 12px; font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; white-space: nowrap; }
   .themebtn:hover { border-color: var(--c1); }
   .mbanner { margin: 0 0 12px; padding: 9px 12px; border-radius: 8px; background: var(--card); border: 1px solid var(--warn); border-left-width: 5px; font-size: 13px; line-height: 1.5; }
+  table.probes td.l { white-space: normal; max-width: 240px; min-width: 120px; overflow: visible; vertical-align: top; }
+  table.probes td { vertical-align: top; }
+  table.probes td.state-ok { color: var(--good); } table.probes td.state-warn { color: var(--warn); } table.probes td.state-bad { color: var(--bad); } table.probes td.state-off { color: var(--muted); }
+  table.probes .note { display: block; color: var(--muted); font-size: 11.5px; }
   .stopbtn:hover { border-color: var(--bad); color: var(--bad); }
   #stopped { text-align: center; margin: 12vh auto; max-width: 520px; color: var(--muted); line-height: 1.6; }
   #stopped h2 { color: var(--text); }
@@ -160,6 +164,10 @@
       <button data-s="10800">3h</button>
       <button data-s="0">All</button>
     </div><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="window">i</span></span>
+    <span class="ctl"><select class="day" id="refreshSel" title="How often this page reloads its data from the local server" aria-label="Refresh interval">
+      <option value="2">↻ every 2 s</option><option value="5">↻ every 5 s</option><option value="10">↻ every 10 s</option>
+      <option value="30">↻ every 30 s</option><option value="60">↻ every 1 min</option><option value="0">↻ paused</option>
+    </select><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="refresh">i</span></span>
     <span class="ctl" id="stopctl" hidden><button class="themebtn stopbtn" id="stopBtn" type="button" title="Stop the background service: monitoring and this page end until you start it again">■ Stop</button><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="stop">i</span></span>
     <span class="ctl"><button class="themebtn" id="themeBtn" type="button" title="Switch between automatic (follows your system), light and dark"></button><span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="theme">i</span></span>
   </header>
@@ -182,6 +190,11 @@
       <div class="chips" id="chips"></div>
       <div id="evmsg"></div>
       <ul class="events" id="events"></ul></div>
+    <div class="card full"><h2>What this app measures — probes and how often<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="probes">i</span></h2>
+      <div class="rangeline" id="probestatus"></div>
+      <div class="tablewrap"><table class="days probes"><thead><tr>
+        <th class="l">Probe</th><th class="l">What it checks</th><th class="l">Target and method</th><th>Every</th><th>Last run</th><th class="l">Last result</th><th class="l">Network use</th>
+      </tr></thead><tbody id="probesbody"><tr><td colspan="7" style="color:var(--muted)">Loading…</td></tr></tbody></table></div></div>
     <div class="card full"><h2>Daily summary — click a day to open it<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="daily">i</span></h2>
       <div class="tablewrap"><table class="days"><thead><tr>
         <th>Day<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_day">i</span></th><th>Samples<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_samples">i</span></th><th>Router loss<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_gwloss">i</span></th><th>Internet loss<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_netloss">i</span></th><th>Router p95<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_gwp95">i</span></th><th>Internet p95<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="d_netp95">i</span></th>
@@ -205,6 +218,8 @@ const TIPS = {
   status: "Health of the latest sample. Healthy: all good. Degraded: a lost ping, SNR under 20 dB, signal weaker than -72 dBm, or internet latency over 150 ms. Down: the router and internet are both unreachable, or Wi-Fi is disconnected. 'No recent data' means the collector is not running or the computer slept.",
   scan: "Pauses or resumes the nearby-network scans. A scan briefly leaves your channel and can cost a lost ping, so turn it off before important calls. Pings and signal keep being recorded either way.",
   stop: "Stops the background service: the collector and this dashboard both end, and your logs are kept. This page cannot start it again. To start: run ./service.sh start (macOS) or service.bat start (Windows) from the project folder. Use ./service.sh open to start it and open this page, or install to start it automatically at every login (uninstall turns that off). The button only appears when the service started this page. If you started with start.sh or start.bat, press Ctrl-C in that window instead.",
+  refresh: "How often this page reloads its data from the local server. Pick a longer time to save battery, or Paused to freeze the page while you read it (the footer then offers Refresh now). The collector keeps taking samples either way: how often it samples is the Every column of the probes table, set with --interval. Refreshing faster than that shows nothing new. Your choice is remembered in this browser.",
+  probes: "Everything the collector measures, how often, and what it costs. Pings go only to your router and the internet target, about 100 bytes each. Wi-Fi status and scans are read from your own adapter and use no internet traffic. Last run and Last result come from the latest logged sample, so a stale time means the collector is not running. Change the intervals with --interval and --scan-every (see the README). The Dashboard refresh row is this page's own setting.",
   day: "Live shows a rolling window of recent data. Pick a day to see that whole day from the saved logs. Live refresh pauses for past days.",
   window: "How much recent history the charts and tiles cover in live view. Choosing one returns you from a past day to live view.",
   theme: "Cycles Auto (follows your system), Light and Dark. Remembered in this browser.",
@@ -527,6 +542,9 @@ function renderSpikes(rows, markers) {
 }
 
 let sel = null, zoom = null;  // sel: dragged range awaiting a decision; zoom: range every chart is zoomed to (ms since epoch)
+let refreshSec = 5;  // seconds between page reloads, 0 = paused; remembered in this browser
+try { const v = localStorage.getItem('refreshSec'); if (v !== null && [0, 2, 5, 10, 30, 60].includes(+v)) refreshSec = +v; } catch (e) { /* storage blocked */ }
+let probeData = null;
 let winSec = 3600, all = [], scans = [], notes = [], merrs = [], days = [], day = null, daysAt = 0, charts = {};
 const todayStr = () => new Date().toLocaleDateString('en-CA');
 const isPast = () => !!day && day !== todayStr();
@@ -759,11 +777,11 @@ function render() {
     ? ev.map(e => `<li><span class="when">${fmtTS(e.x)}</span><span class="tag ${e.tag}">${e.label}</span><span>${e.text}</span></li>`).join('')
     : '<li><span style="color:var(--muted)">No events in this window.</span></li>';
 
-  $('#foot').textContent = zoom
+  $('#foot').innerHTML = zoom
     ? `Zoomed view ${fmtTS(zoom.a)} – ${fmtTS(zoom.b)} · ${rows.length} samples · live refresh paused (Reset zoom to resume)`
     : past
     ? `Day view ${day} · ${rows.length} samples · source: logs/`
-    : `Updated ${fmtTS(now)} · ${rows.length} samples in window · refreshes every 5s · source: logs/`;
+    : `Updated ${fmtTS(now)} · ${rows.length} samples in window · ${refreshSec ? `refreshes every ${refreshLabel(refreshSec)}` : '<b>auto-refresh paused</b> · <a href="#" id="refreshNow">Refresh now</a>'} · source: logs/`;
   document.querySelector('#win').classList.toggle('dim', !!day);
   viewRange = { a: xmin, b: xmax };
   renderSel();
@@ -827,11 +845,60 @@ async function load() {
     try { scans = (await (await fetch('/api/scan' + q, { cache: 'no-store' })).json()).map(d => ({ ...d, x: pT(d.t) })); } catch (e) { scans = []; }
     try { const ev = (await (await fetch('/api/events' + q, { cache: 'no-store' })).json()).map(d => ({ ...d, x: pT(d.t) })); notes = ev.filter(n => !isMeasure(n)); merrs = ev.filter(isMeasure); } catch (e) { notes = []; merrs = []; }
     render();
+    loadProbes();
     if (Date.now() - daysAt > 60000) loadDays();
     loadControl();
   } catch (e) {
     $('#status').textContent = 'Dashboard server unreachable'; $('#dot').style.background = css('--bad');
   }
+}
+
+// ---- refresh interval (adjustable) and the probes table
+const refreshLabel = s => s < 60 ? `${s}s` : `${s / 60} min`;
+const fmtEvery = s => !s ? 'off' : s < 60 ? `${s} s` : s < 3600 ? `${+(s / 60).toFixed(1)} min` : `${+(s / 3600).toFixed(1)} h`;
+const fmtAgo = s => s == null ? '–' : s < 2 ? 'just now' : s < 60 ? `${s} s ago` : s < 3600 ? `${Math.floor(s / 60)} min ago` : `${Math.floor(s / 3600)} h ago`;
+const escHtml = t => String(t == null ? '' : t).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+let refreshTimer = null;
+function scheduleRefresh() {
+  clearInterval(refreshTimer);
+  refreshTimer = refreshSec ? setInterval(() => { if (!isPast() && !zoom && !window.stopped) load(); }, refreshSec * 1000) : null;
+}
+$('#refreshSel').value = String(refreshSec);
+$('#refreshSel').addEventListener('change', e => {
+  refreshSec = +e.target.value;
+  try { localStorage.setItem('refreshSec', String(refreshSec)); } catch (err) { /* storage blocked */ }
+  scheduleRefresh();
+  render();                    // update the footer at once, then fetch fresh data
+  if (refreshSec) load();
+  renderProbes();
+});
+$('#foot').addEventListener('click', e => { if (e.target.id === 'refreshNow') { e.preventDefault(); load(); } });
+
+async function loadProbes() {
+  try { probeData = await (await fetch('/api/probes', { cache: 'no-store' })).json(); } catch (e) { /* keep the last table */ }
+  renderProbes();
+}
+function probeRows() {
+  const rows = probeData ? probeData.probes.slice() : [];
+  rows.push({ id: 'refresh', name: 'Dashboard refresh', what: 'This page re-reading the logs from the local server', target: 'the dashboard server on this computer',
+    method: 'GET /api/data, /api/scan, /api/events, /api/probes', every: refreshSec || null, everyText: refreshSec ? fmtEvery(refreshSec) : 'off (paused)',
+    last: null, ago: null, result: refreshSec ? 'live' : 'paused', state: refreshSec ? 'ok' : 'off', traffic: 'none (localhost only)', note: 'adjustable in the header' });
+  return rows;
+}
+function renderProbes() {
+  const body = $('#probesbody'); if (!body) return;
+  const c = probeData && probeData.collector;
+  $('#probestatus').textContent = !c ? '' : c.running
+    ? `Collector running${c.pid ? ` (pid ${c.pid})` : ''}${c.started ? `, started ${c.started}` : ''}${c.system ? ` · ${c.system}` : ''}${c.settingsKnown ? '' : ' · intervals inferred from the log (restart the collector to read its exact settings)'}`
+    : `Collector not running (last sample ${c && c.lastSample || 'never'}). The table shows the last known settings.`;
+  body.innerHTML = probeRows().map(p => {
+    const stale = p.ago != null && p.every && p.ago > Math.max(30, 4 * p.every);
+    return `<tr><td class="l"><b>${escHtml(p.name)}</b></td><td class="l">${escHtml(p.what)}</td>`
+      + `<td class="l">${escHtml(p.target)}<span class="note">${escHtml(p.method)}</span></td>`
+      + `<td>${escHtml(p.everyText)}${p.note ? `<span class="note">${escHtml(p.note)}</span>` : ''}</td>`
+      + `<td class="${stale ? 'state-warn' : ''}" title="${escHtml(p.last || '')}">${p.last ? fmtAgo(p.ago) : '–'}</td>`
+      + `<td class="l state-${p.state}">${escHtml(p.result)}</td><td class="l">${escHtml(p.traffic)}</td></tr>`;
+  }).join('');
 }
 
 const CHIPS = ['Changed router setting', 'Reconnected to Wi-Fi', 'Switched network', 'Moved location', 'Joined call', 'Left call', 'Restarted router'];
@@ -1019,11 +1086,13 @@ const EXPORTS = {
                    m.x1 != null ? new Date(m.x1 - new Date(m.x1).getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace('T', ' ') : null,
                    m.type === 'outages' ? (m.kind === 'gap' ? 'gap' : 'outage') : m.type === 'changes' ? 'channel_change' : m.type === 'errors' ? 'measurement' : 'note', m.text]) };
   },
+  probes: () => ({ cols: ['probe', 'what_it_checks', 'target', 'method', 'every_seconds', 'last_run', 'last_result', 'network_use'],
+    rows: probeRows().map(p => [p.name, p.what, p.target, p.method, p.every, p.last, p.result, p.traffic]) }),
   daily: () => ({ cols: ['day', 'samples', 'router_loss_pct', 'internet_loss_pct', 'router_p95_ms', 'internet_p95_ms', 'internet_median_ms', 'outage_min', 'band_channel_changes', 'avg_rssi_dbm', 'avg_snr_db', 'notes', 'measurement_error_samples'],
     rows: days.map(d => [d.day, d.samples, d.gwLoss, d.netLoss, d.gwP95, d.netP95, d.netMedian, d.outageMin, d.changes, d.rssi, d.snr, d.notes.join(' | '), d.errSamples]) }),
 };
 const EXPORT_CHART = { latency: 'lat', signal: 'sig', snrchart: 'snr', txchart: 'tx', sharing: 'crowd', bychannel: 'ch', leastcrowded: 'blocks' };
-const EXPORT_NAME = { latency: 'latency', signal: 'signal', snrchart: 'snr', txchart: 'tx-rate', sharing: 'channel-sharing', bychannel: 'channels-nearby', leastcrowded: 'least-crowded', events: 'events', daily: 'daily-summary' };
+const EXPORT_NAME = { latency: 'latency', signal: 'signal', snrchart: 'snr', txchart: 'tx-rate', sharing: 'channel-sharing', bychannel: 'channels-nearby', leastcrowded: 'least-crowded', events: 'events', daily: 'daily-summary', probes: 'probes' };
 
 function download(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
@@ -1119,7 +1188,7 @@ document.querySelectorAll('.card h2 .hint').forEach(h => {
   if (EXPORTS[key] && card) card.insertAdjacentHTML('afterbegin', `<button class="expbtn" type="button" data-exp="${key}" aria-haspopup="menu" aria-expanded="false" aria-label="Export data" title="Export this data as CSV, Excel, JSON or image (follows the selected range)"><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="M7 11l5 5 5-5"/><path d="M4 20h16"/></svg></button>`);
 });
 
-init(); load(); loadDays(); setInterval(() => { if (!isPast() && !zoom && !window.stopped) load(); }, 5000);
+init(); load(); loadDays(); scheduleRefresh();
 </script>
 </body>
 </html>

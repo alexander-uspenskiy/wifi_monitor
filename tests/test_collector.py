@@ -294,6 +294,7 @@ class MainLoopTests(unittest.TestCase):
 
     def run_main(self, gw_results, net_results, wifi_results, gateway=("192.168.1.1", None), win=True):
         logged, sleeps = [], []
+        self.info_writes = []
         gws, nets, wifis = iter(gw_results), iter(net_results), iter(wifi_results)
 
         def fake_ping(host):
@@ -305,7 +306,8 @@ class MainLoopTests(unittest.TestCase):
                 raise KeyboardInterrupt
 
         with mock.patch.object(c, "IS_WIN", win), mock.patch.object(c, "IS_MAC", not win), \
-                mock.patch.object(c, "default_gateway", return_value=gateway) as gw_lookup, \
+                mock.patch.object(c, "default_gateway", **({"side_effect": gateway} if isinstance(gateway, list) else {"return_value": gateway})) as gw_lookup, \
+                mock.patch.object(c.logstore, "write_info", side_effect=lambda info: self.info_writes.append(dict(info))), \
                 mock.patch.object(c, "ping", side_effect=fake_ping), mock.patch.object(c, "get_wifi", side_effect=lambda h: next(wifis)), \
                 mock.patch.object(c, "ensure_mac_helper", return_value=False), \
                 mock.patch.object(c.time, "sleep", side_effect=fake_sleep), \
@@ -350,6 +352,20 @@ class MainLoopTests(unittest.TestCase):
         lines, lookup = self.run_main([(None, None)] * 3, [(20.0, None)] * 3, [self.GOOD_WIFI] * 3, gateway=(c.ERR, "route failed"))
         self.assertTrue(all(l.startswith("gateway_ms=ERR internet_ms=20.000") for l in lines if "EVENT" not in l))
         self.assertEqual(lookup.call_count, 3)  # looked up again on every sample until it works
+
+    def test_collector_publishes_its_settings_for_the_dashboard(self):
+        self.run_main([(3.0, None)] * 2, [(20.0, None)] * 2, [self.GOOD_WIFI] * 2)
+        first = self.info_writes[0]
+        self.assertEqual((first["interval"], first["scan_every"], first["host"]), (5.0, 0, "1.1.1.1"))
+        self.assertIn("pid", first)
+        self.assertTrue(first["system"].startswith("Windows"))
+        self.assertEqual(self.info_writes[-1]["gateway"], "192.168.1.1")
+
+    def test_settings_are_rewritten_only_when_the_gateway_changes(self):
+        self.run_main([(3.0, None)] * 3, [(20.0, None)] * 3, [self.GOOD_WIFI] * 3,
+                      gateway=[(c.ERR, "route failed"), ("192.168.1.1", None), ("192.168.1.1", None)])
+        gateways = [w["gateway"] for w in self.info_writes]
+        self.assertEqual(gateways, [None, "192.168.1.1"])  # start-up write, then one update; no write while it stays the same
 
     def test_mac_run_does_not_use_windows_paths(self):
         with mock.patch.object(c, "win_wifi", side_effect=AssertionError("Windows code ran on macOS")):

@@ -19,7 +19,7 @@ function line(name) {                     // a one-line `const name = ...;` decl
   return m ? m[0] : '';
 }
 const wanted = ['buildMarkers', 'analyzeSpikes', 'qualityStats', 'events'].map(fn).join('\n');
-const consts = ['pT', 'fmtTS', 'fmtDur', 'pct', 'f1', 'fmtAvail', 'isMeasure'].map(line).join('\n');
+const consts = ['pT', 'fmtTS', 'fmtDur', 'pct', 'f1', 'fmtAvail', 'isMeasure', 'refreshLabel', 'fmtEvery', 'fmtAgo', 'escHtml'].map(line).join('\n');
 const gaps = (script.match(/^const STALE_MS = .*$/m) || [''])[0];
 
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
@@ -32,6 +32,7 @@ const body = `
     stats: qualityStats(input.rows, input.xmin, input.xmax),
     markers: buildMarkers(input.rows),
     events: events(input.rows),
+    calls: (input.calls || []).map(([name, args]) => ({ refreshLabel, fmtEvery, fmtAgo, escHtml })[name](...args)),
     spikes: analyzeSpikes(input.rows, buildMarkers(input.rows)).map(e => ({ cause: e.cause, group: e.group, lost: e.lost })),
   };`;
 process.stdout.write(JSON.stringify(new Function('input', body)(input)));

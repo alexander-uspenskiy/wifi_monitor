@@ -335,6 +335,9 @@ def main():
     pool = cf.ThreadPoolExecutor(max_workers=2)
     gw, gw_reason, gw_at, last_day, next_scan = None, None, 0.0, None, 0.0
     tracker = ErrorTracker()
+    info = {"pid": os.getpid(), "started": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "system": system_info(),
+            "interval": args.interval, "scan_every": args.scan_every, "host": args.host, "gateway": None, "mac_helper": have_helper}
+    logstore.write_info(info)  # lets the dashboard show the real probe settings
     try:
         while True:
             start = time.time()
@@ -344,6 +347,10 @@ def main():
                 last_day = now.date()
             if gw in (None, ERR) or start - gw_at > 60:
                 (gw, gw_reason), gw_at = default_gateway(), start
+                shown = gw if gw not in (None, ERR) else None
+                if shown != info["gateway"]:
+                    info["gateway"] = shown
+                    logstore.write_info(info)
             f_gw = pool.submit(ping, gw) if gw != ERR else None
             f_net = pool.submit(ping, args.host)
             wifi = get_wifi(have_helper)
