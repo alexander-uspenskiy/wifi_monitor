@@ -1,6 +1,13 @@
 """Dashboard server: parsing log lines (old and new formats) and the daily summary."""
 import datetime as dt
+import json
+import os
+import threading
 import unittest
+import unittest.mock
+import urllib.error
+import urllib.request
+from http.server import ThreadingHTTPServer
 
 import context  # noqa: F401
 import dashboard_server as s
@@ -165,8 +172,105 @@ class ProbesTests(unittest.TestCase):
         self.assertFalse(collector["running"])
         self.assertEqual((p["router"]["state"], p["wifi"]["state"], p["scan"]["result"]), ("off", "off", "no scan yet"))
 
+    def test_retimeable_probes_carry_their_menu(self):
+        _, p = self.probes(control={"interval": 10, "scan_every": None})
+        for pid in ("router", "internet", "wifi"):
+            c = p[pid]["control"]
+            self.assertEqual((c["key"], c["override"], c["default"], c["value"]), ("interval", 10, 5.0, 10))
+            self.assertEqual(c["choices"], [2, 5, 10, 15])
+        self.assertEqual(p["router"]["everyText"], "10 s")  # the override wins over the collector's start-up value
+        sc = p["scan"]["control"]
+        self.assertEqual((sc["key"], sc["override"], sc["default"], sc["value"]), ("scan_every", None, 900, 900))
+        self.assertEqual(sc["choices"], [0, 300, 900, 1800, 3600])
+        for pid in ("gateway", "maintain"):
+            self.assertNotIn("control", p[pid])
+
+    def test_scan_override_wins_and_zero_means_off(self):
+        _, p = self.probes(control={"scan_every": 1800})
+        self.assertEqual(p["scan"]["everyText"], "30 min")
+        _, p = self.probes(control={"scan_every": 0})
+        self.assertEqual((p["scan"]["everyText"], p["scan"]["state"], p["scan"]["control"]["value"]), ("off", "off", 0))
+
     def test_every_text(self):
         self.assertEqual([s.every_text(v) for v in (0, 2, 5.0, 59, 60, 900, 5400, 7200)], ["off", "2 s", "5 s", "59 s", "1 min", "15 min", "1.5 h", "2 h"])
+
+
+class ControlApiTests(unittest.TestCase):
+    """The real request handler on a throwaway port: what the dashboard may change, and what it may not."""
+
+    @classmethod
+    def setUpClass(cls):
+        cls.server = ThreadingHTTPServer(("127.0.0.1", 0), s.Handler)
+        cls.port = cls.server.server_address[1]
+        threading.Thread(target=cls.server.serve_forever, daemon=True).start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.server.shutdown()
+        cls.server.server_close()
+
+    def setUp(self):
+        for path in (s.logstore.CONTROL_FILE,):
+            if os.path.exists(path):
+                os.remove(path)
+        self.events = []
+        patcher = unittest.mock.patch.object(s, "note_event", side_effect=self.events.append)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def post(self, body, origin=None, ctype="application/json"):
+        headers = {"Content-Type": ctype}
+        if origin:
+            headers["Origin"] = origin
+        req = urllib.request.Request("http://127.0.0.1:%d/api/control" % self.port, json.dumps(body).encode(), headers)
+        try:
+            with urllib.request.urlopen(req, timeout=5) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, e.read().decode()
+
+    def get(self):
+        with urllib.request.urlopen("http://127.0.0.1:%d/api/control" % self.port, timeout=5) as r:
+            return json.loads(r.read())
+
+    def test_interval_and_scan_period_can_be_set_and_are_noted(self):
+        code, ctl = self.post({"interval": 10})
+        self.assertEqual((code, ctl["interval"]), (200, 10))
+        code, ctl = self.post({"scan_every": 0})
+        self.assertEqual((code, ctl["scan_every"]), (200, 0))
+        self.assertEqual(self.get(), {"scan_paused": False, "interval": 10, "scan_every": 0})
+        self.assertEqual(self.events, ["Probe interval set to 10 s from the dashboard", "Scan interval set to off from the dashboard"])
+
+    def test_null_goes_back_to_the_start_up_value(self):
+        self.post({"interval": 15})
+        code, ctl = self.post({"interval": None})
+        self.assertEqual((code, ctl["interval"]), (200, None))
+        self.assertEqual(self.events[-1], "Probe interval back to the command-line value")
+
+    def test_scan_period_null_is_noted_plainly(self):
+        self.post({"scan_every": 300})
+        self.post({"scan_every": None})
+        self.assertEqual(self.events, ["Scan interval set to 5 min from the dashboard", "Scan interval back to the command-line value"])
+
+    def test_scan_switch_still_works_and_only_notes_real_changes(self):
+        self.post({"scan_paused": True})
+        self.post({"scan_paused": True})
+        self.post({"scan_paused": False})
+        self.assertEqual(self.events, ["Scanning paused", "Scanning resumed"])
+
+    def test_unsupported_values_are_refused(self):
+        for body in ({"interval": 60}, {"interval": 1}, {"interval": "5"}, {"interval": True}, {"scan_every": 17}, {"scan_paused": "yes"},
+                     {"nonsense": 1}, {}, {"interval": 5, "nonsense": 1}):
+            with self.subTest(body):
+                code, text = self.post(body)
+                self.assertEqual(code, 400)
+        self.assertEqual(self.get(), {"scan_paused": False, "interval": None, "scan_every": None})  # nothing was applied
+        self.assertEqual(self.events, [])
+
+    def test_foreign_origins_and_wrong_content_types_are_refused(self):
+        self.assertEqual(self.post({"interval": 10}, origin="http://evil.example")[0], 403)
+        self.assertEqual(self.post({"interval": 10}, ctype="text/plain")[0], 403)
+        self.assertEqual(self.get()["interval"], None)
 
 
 if __name__ == "__main__":

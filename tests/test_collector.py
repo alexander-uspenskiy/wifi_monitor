@@ -263,6 +263,46 @@ class FormatTests(unittest.TestCase):
         self.assertEqual((c.ms(2.0), c.ms(None), c.ms(c.ERR)), ("2.000", "LOST", "ERR"))
 
 
+class EffectiveSettingsTests(unittest.TestCase):
+    ARGS = type("Args", (), {"interval": 5.0, "scan_every": 900})()
+
+    def effective(self, control):
+        with mock.patch.object(c.logstore, "read_control", return_value={"scan_paused": False, "interval": None, "scan_every": None, **control}):
+            return c.effective(self.ARGS)
+
+    def test_command_line_values_apply_by_default(self):
+        _, interval, scan_every = self.effective({})
+        self.assertEqual((interval, scan_every), (5.0, 900))
+
+    def test_dashboard_values_override(self):
+        _, interval, scan_every = self.effective({"interval": 10, "scan_every": 300})
+        self.assertEqual((interval, scan_every), (10, 300))
+
+    def test_zero_scan_period_means_off_not_default(self):
+        self.assertEqual(self.effective({"scan_every": 0})[2], 0)
+
+    def test_pause_waits_for_the_current_interval_and_notices_a_change(self):
+        clock = {"now": 100.0}
+        control = {"interval": 15}
+
+        def fake_sleep(sec):
+            self.assertLessEqual(sec, 1.0)  # short steps, so a change is noticed quickly
+            clock["now"] += sec
+            if clock["now"] >= 103.0:
+                control["interval"] = 2  # the user picks a shorter interval while the collector waits
+
+        with mock.patch.object(c.time, "time", side_effect=lambda: clock["now"]), mock.patch.object(c.time, "sleep", side_effect=fake_sleep), \
+                mock.patch.object(c.logstore, "read_control", side_effect=lambda: {"scan_paused": False, "interval": control["interval"], "scan_every": None}):
+            c.pause(100.0, self.ARGS)
+        self.assertAlmostEqual(clock["now"], 103.0)  # due at 100 + 2 s once the shorter interval applies, so it returns at the first check after that
+
+    def test_pause_returns_at_once_when_the_sample_took_longer_than_the_interval(self):
+        with mock.patch.object(c.time, "time", return_value=200.0), mock.patch.object(c.time, "sleep") as sleep, \
+                mock.patch.object(c.logstore, "read_control", return_value={"scan_paused": False, "interval": None, "scan_every": None}):
+            c.pause(100.0, self.ARGS)
+        sleep.assert_not_called()
+
+
 class ErrorTrackerTests(unittest.TestCase):
     def test_announces_once_after_three_failures_then_recovery(self):
         t = c.ErrorTracker()
@@ -292,7 +332,7 @@ class ErrorTrackerTests(unittest.TestCase):
 class MainLoopTests(unittest.TestCase):
     """Runs collector.main() for a few samples with simulated measurements and reads back what it logged."""
 
-    def run_main(self, gw_results, net_results, wifi_results, gateway=("192.168.1.1", None), win=True):
+    def run_main(self, gw_results, net_results, wifi_results, gateway=("192.168.1.1", None), win=True, control=None, scan_every=0):
         logged, sleeps = [], []
         self.info_writes = []
         gws, nets, wifis = iter(gw_results), iter(net_results), iter(wifi_results)
@@ -310,11 +350,13 @@ class MainLoopTests(unittest.TestCase):
                 mock.patch.object(c.logstore, "write_info", side_effect=lambda info: self.info_writes.append(dict(info))), \
                 mock.patch.object(c, "ping", side_effect=fake_ping), mock.patch.object(c, "get_wifi", side_effect=lambda h: next(wifis)), \
                 mock.patch.object(c, "ensure_mac_helper", return_value=False), \
-                mock.patch.object(c.time, "sleep", side_effect=fake_sleep), \
+                mock.patch.object(c, "pause", side_effect=lambda *a: fake_sleep(None)), \
                 mock.patch.object(c.logstore, "append", side_effect=lambda kind, line, when=None: logged.append(line)), \
-                mock.patch.object(c.logstore, "maintain"), mock.patch.object(c.logstore, "read_control", return_value={"scan_paused": False}), \
-                mock.patch.object(sys, "argv", ["collector.py", "--scan-every", "0"]), contextlib.redirect_stdout(io.StringIO()):
+                mock.patch.object(c.logstore, "maintain"), mock.patch.object(c.logstore, "read_control", return_value={"scan_paused": False, "interval": None, "scan_every": None, **(control or {})}), \
+                mock.patch.object(c, "do_scan") as do_scan, \
+                mock.patch.object(sys, "argv", ["collector.py", "--scan-every", str(scan_every)]), contextlib.redirect_stdout(io.StringIO()):
             c.main()
+        self.scans = do_scan.call_count
         return [re.sub(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d ", "", line) for line in logged], gw_lookup
 
     GOOD_WIFI = {"assoc": True, "rssi": -50, "ch": 13, "band": "2.4", "tx": "72", "phy": "n"}
@@ -366,6 +408,18 @@ class MainLoopTests(unittest.TestCase):
                       gateway=[(c.ERR, "route failed"), ("192.168.1.1", None), ("192.168.1.1", None)])
         gateways = [w["gateway"] for w in self.info_writes]
         self.assertEqual(gateways, [None, "192.168.1.1"])  # start-up write, then one update; no write while it stays the same
+
+    def test_scan_period_from_the_command_line_scans_at_the_first_sample(self):
+        self.run_main([(3.0, None)] * 2, [(20.0, None)] * 2, [self.GOOD_WIFI] * 2, scan_every=900)
+        self.assertEqual(self.scans, 1)
+
+    def test_dashboard_can_turn_scanning_off(self):
+        self.run_main([(3.0, None)] * 3, [(20.0, None)] * 3, [self.GOOD_WIFI] * 3, scan_every=900, control={"scan_every": 0})
+        self.assertEqual(self.scans, 0)
+
+    def test_scan_switch_pauses_scans(self):
+        self.run_main([(3.0, None)] * 3, [(20.0, None)] * 3, [self.GOOD_WIFI] * 3, scan_every=900, control={"scan_paused": True})
+        self.assertEqual(self.scans, 0)
 
     def test_mac_run_does_not_use_windows_paths(self):
         with mock.patch.object(c, "win_wifi", side_effect=AssertionError("Windows code ran on macOS")):

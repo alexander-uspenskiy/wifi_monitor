@@ -83,6 +83,7 @@
   table.probes td { vertical-align: top; }
   table.probes td.state-ok { color: var(--good); } table.probes td.state-warn { color: var(--warn); } table.probes td.state-bad { color: var(--bad); } table.probes td.state-off { color: var(--muted); }
   table.probes .note { display: block; color: var(--muted); font-size: 11.5px; }
+  table.probes select.every { font: inherit; padding: 2px 4px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--text); max-width: 100%; }
   .stopbtn:hover { border-color: var(--bad); color: var(--bad); }
   #stopped { text-align: center; margin: 12vh auto; max-width: 520px; color: var(--muted); line-height: 1.6; }
   #stopped h2 { color: var(--text); }
@@ -219,7 +220,7 @@ const TIPS = {
   scan: "Pauses or resumes the nearby-network scans. A scan briefly leaves your channel and can cost a lost ping, so turn it off before important calls. Pings and signal keep being recorded either way.",
   stop: "Stops the background service: the collector and this dashboard both end, and your logs are kept. This page cannot start it again. To start: run ./service.sh start (macOS) or service.bat start (Windows) from the project folder. Use ./service.sh open to start it and open this page, or install to start it automatically at every login (uninstall turns that off). The button only appears when the service started this page. If you started with start.sh or start.bat, press Ctrl-C in that window instead.",
   refresh: "How often this page reloads its data from the local server. Pick a longer time to save battery, or Paused to freeze the page while you read it (the footer then offers Refresh now). The collector keeps taking samples either way: how often it samples is the Every column of the probes table, set with --interval. Refreshing faster than that shows nothing new. Your choice is remembered in this browser.",
-  probes: "Everything the collector measures, how often, and what it costs. Pings go only to your router and the internet target, about 100 bytes each. Wi-Fi status and scans are read from your own adapter and use no internet traffic. Last run and Last result come from the latest logged sample, so a stale time means the collector is not running. Change the intervals with --interval and --scan-every (see the README). The Dashboard refresh row is this page's own setting.",
+  probes: "Everything the collector measures, how often, and what it costs. Use the menus in the Every column to retime the probes: the router, internet and Wi-Fi probes share one sampling interval (2 to 15 s), and scans run every 5 min to 1 h or not at all. A change applies within a few seconds, is noted in the Events card, and stays until you change it again; \"start-up value\" returns to the --interval and --scan-every flags. Slower sampling than 15 s is not offered because the charts treat longer silences as missing data. Pings go only to your router and the internet target, about 100 bytes each. Wi-Fi status and scans are read from your own adapter and use no internet traffic. Last run and Last result come from the latest logged sample, so a stale time means the collector is not running. The Dashboard refresh row is this page's own setting, in the header.",
   day: "Live shows a rolling window of recent data. Pick a day to see that whole day from the saved logs. Live refresh pauses for past days.",
   window: "How much recent history the charts and tiles cover in live view. Choosing one returns you from a past day to live view.",
   theme: "Cycles Auto (follows your system), Light and Dark. Remembered in this browser.",
@@ -544,7 +545,7 @@ function renderSpikes(rows, markers) {
 let sel = null, zoom = null;  // sel: dragged range awaiting a decision; zoom: range every chart is zoomed to (ms since epoch)
 let refreshSec = 5;  // seconds between page reloads, 0 = paused; remembered in this browser
 try { const v = localStorage.getItem('refreshSec'); if (v !== null && [0, 2, 5, 10, 30, 60].includes(+v)) refreshSec = +v; } catch (e) { /* storage blocked */ }
-let probeData = null;
+let probeData = null, probeMsg = '';
 let winSec = 3600, all = [], scans = [], notes = [], merrs = [], days = [], day = null, daysAt = 0, charts = {};
 const todayStr = () => new Date().toLocaleDateString('en-CA');
 const isPast = () => !!day && day !== todayStr();
@@ -878,6 +879,26 @@ async function loadProbes() {
   try { probeData = await (await fetch('/api/probes', { cache: 'no-store' })).json(); } catch (e) { /* keep the last table */ }
   renderProbes();
 }
+// "Every" menu for the probes the dashboard can retime. "default" removes the override and returns to the collector's start-up value.
+const everyLabel = (key, v) => key === 'scan_every' && !v ? 'off' : fmtEvery(v);
+function everySelect(c) {
+  const opts = [`<option value="default"${c.override == null ? ' selected' : ''}>start-up value (${everyLabel(c.key, c.default)})</option>`]
+    .concat(c.choices.map(v => `<option value="${v}"${c.override === v ? ' selected' : ''}>${everyLabel(c.key, v)}</option>`));
+  return `<select class="every" data-ctl="${c.key}" aria-label="How often: ${escHtml(everyLabel(c.key, c.value))}" title="Takes effect within a few seconds and stays until you change it again">${opts.join('')}</select>`
+    + `<span class="note">${c.note ? escHtml(c.note) + ' · ' : ''}now ${escHtml(everyLabel(c.key, c.value))}</span>`;
+}
+$('#probesbody').addEventListener('change', async e => {
+  const sel = e.target.closest('select[data-ctl]'); if (!sel) return;
+  const value = sel.value === 'default' ? null : +sel.value;
+  try {
+    const r = await fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [sel.dataset.ctl]: value }) });
+    if (!r.ok) throw new Error(r.status);
+    probeMsg = 'Saved. The collector applies it within a few seconds.';
+  } catch (err) { probeMsg = 'Could not save the setting (is the dashboard server running?)'; }
+  sel.blur();
+  await loadProbes();
+  load();  // pick up the note the server logged
+});
 function probeRows() {
   const rows = probeData ? probeData.probes.slice() : [];
   rows.push({ id: 'refresh', name: 'Dashboard refresh', what: 'This page re-reading the logs from the local server', target: 'the dashboard server on this computer',
@@ -891,11 +912,13 @@ function renderProbes() {
   $('#probestatus').textContent = !c ? '' : c.running
     ? `Collector running${c.pid ? ` (pid ${c.pid})` : ''}${c.started ? `, started ${c.started}` : ''}${c.system ? ` · ${c.system}` : ''}${c.settingsKnown ? '' : ' · intervals inferred from the log (restart the collector to read its exact settings)'}`
     : `Collector not running (last sample ${c && c.lastSample || 'never'}). The table shows the last known settings.`;
+  if (probeMsg) $('#probestatus').textContent += ` · ${probeMsg}`;
+  if (document.activeElement && document.activeElement.tagName === 'SELECT' && body.contains(document.activeElement)) return;  // do not close a menu the user is using
   body.innerHTML = probeRows().map(p => {
     const stale = p.ago != null && p.every && p.ago > Math.max(30, 4 * p.every);
     return `<tr><td class="l"><b>${escHtml(p.name)}</b></td><td class="l">${escHtml(p.what)}</td>`
       + `<td class="l">${escHtml(p.target)}<span class="note">${escHtml(p.method)}</span></td>`
-      + `<td>${escHtml(p.everyText)}${p.note ? `<span class="note">${escHtml(p.note)}</span>` : ''}</td>`
+      + `<td>${p.control ? everySelect(p.control) : escHtml(p.everyText)}${p.note ? `<span class="note">${escHtml(p.note)}</span>` : ''}</td>`
       + `<td class="${stale ? 'state-warn' : ''}" title="${escHtml(p.last || '')}">${p.last ? fmtAgo(p.ago) : '–'}</td>`
       + `<td class="l state-${p.state}">${escHtml(p.result)}</td><td class="l">${escHtml(p.traffic)}</td></tr>`;
   }).join('');

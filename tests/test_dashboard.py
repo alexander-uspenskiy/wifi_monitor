@@ -195,6 +195,15 @@ class RefreshAndProbesTests(unittest.TestCase):
             with self.subTest(needle):
                 self.assertIn(needle, self.html)
 
+    def test_probe_menus_are_wired(self):
+        for needle in ("function everySelect", 'data-ctl="', "start-up value", "'/api/control'", "body.contains(document.activeElement)"):
+            with self.subTest(needle):
+                self.assertIn(needle, self.html)
+
+    def test_menu_labels(self):
+        out = helpers([["everyLabel", ["scan_every", 0]], ["everyLabel", ["scan_every", 900]], ["everyLabel", ["interval", 5]], ["everyLabel", ["scan_every", 3600]]])
+        self.assertEqual(out, ["off", "15 min", "5 s", "1 h"])
+
     def test_formatting_helpers(self):
         out = helpers([["fmtEvery", [0]], ["fmtEvery", [5]], ["fmtEvery", [60]], ["fmtEvery", [900]], ["fmtEvery", [5400]],
                        ["fmtAgo", [None]], ["fmtAgo", [0]], ["fmtAgo", [12]], ["fmtAgo", [150]], ["fmtAgo", [7300]],

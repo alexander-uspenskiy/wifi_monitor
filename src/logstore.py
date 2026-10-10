@@ -87,21 +87,37 @@ def read_lines(kind, max_lines):
 
 
 CONTROL_FILE = os.path.join(LOG_DIR, "control.json")
-CONTROL_DEFAULTS = {"scan_paused": False}
+# None means "use the collector's command-line value". The page thresholds for gaps and stale data assume samples at most
+# about 15 s apart, so slower sampling is not offered.
+INTERVAL_CHOICES = (2, 5, 10, 15)               # seconds between samples (router ping, internet ping, Wi-Fi status)
+SCAN_CHOICES = (0, 300, 900, 1800, 3600)        # seconds between nearby-network scans, 0 = off
+CONTROL_DEFAULTS = {"scan_paused": False, "interval": None, "scan_every": None}
+
+
+def valid_control(key, value):
+    if key == "scan_paused":
+        return isinstance(value, bool)
+    if key == "interval":
+        return value is None or (isinstance(value, (int, float)) and not isinstance(value, bool) and value in INTERVAL_CHOICES)
+    if key == "scan_every":
+        return value is None or (isinstance(value, (int, float)) and not isinstance(value, bool) and value in SCAN_CHOICES)
+    return False
 
 
 def read_control():
-    """Runtime switches shared by the dashboard and the collector (re-read every sample)."""
+    """Runtime switches shared by the dashboard and the collector (re-read every sample). Invalid values fall back to the default."""
     try:
         with open(CONTROL_FILE, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
         data = {}
-    return {**CONTROL_DEFAULTS, **{k: data[k] for k in CONTROL_DEFAULTS if k in data}}
+    if not isinstance(data, dict):
+        data = {}
+    return {k: (data[k] if k in data and valid_control(k, data[k]) else default) for k, default in CONTROL_DEFAULTS.items()}
 
 
 def write_control(**changes):
-    ctl = {**read_control(), **{k: v for k, v in changes.items() if k in CONTROL_DEFAULTS}}
+    ctl = {**read_control(), **{k: v for k, v in changes.items() if k in CONTROL_DEFAULTS and valid_control(k, v)}}
     os.makedirs(LOG_DIR, exist_ok=True)
     tmp = CONTROL_FILE + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:

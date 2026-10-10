@@ -288,6 +288,21 @@ def do_scan(have_mac_helper):
     logstore.append("scan", "%s %s" % (when.strftime("%Y-%m-%d %H:%M:%S"), payload), when)
 
 
+def effective(args):
+    """The control file (set from the dashboard) overrides the command-line values. Returns (control, interval, scan_every)."""
+    ctl = logstore.read_control()
+    return ctl, ctl["interval"] or args.interval, args.scan_every if ctl["scan_every"] is None else ctl["scan_every"]
+
+
+def pause(start, args):
+    """Wait until the next sample is due, in 1 s steps, so an interval changed on the dashboard applies within a second."""
+    while True:
+        remaining = start + effective(args)[1] - time.time()
+        if remaining <= 0:
+            return
+        time.sleep(min(remaining, 1.0))
+
+
 def ms(v):
     return "LOST" if v is None else v if v == ERR else "%.3f" % v
 
@@ -334,6 +349,7 @@ def main():
 
     pool = cf.ThreadPoolExecutor(max_workers=2)
     gw, gw_reason, gw_at, last_day, next_scan = None, None, 0.0, None, 0.0
+    last_scan_every = args.scan_every
     tracker = ErrorTracker()
     info = {"pid": os.getpid(), "started": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "system": system_info(),
             "interval": args.interval, "scan_every": args.scan_every, "host": args.host, "gateway": None, "mac_helper": have_helper}
@@ -365,12 +381,15 @@ def main():
                 if event:
                     logstore.append("monitor", "%s EVENT %s" % (now.strftime("%Y-%m-%d %H:%M:%S"), event), now)
                     print(event, flush=True)
-            if logstore.read_control()["scan_paused"]:
-                next_scan = start + args.scan_every  # on resume, wait a full interval before scanning
-            elif args.scan_every and start >= next_scan:
+            ctl, _, scan_every = effective(args)
+            if scan_every != last_scan_every:  # changed on the dashboard: wait a full new period before the next scan
+                last_scan_every, next_scan = scan_every, start + scan_every
+            if ctl["scan_paused"]:
+                next_scan = start + scan_every  # on resume, wait a full interval before scanning
+            elif scan_every and start >= next_scan:
                 threading.Thread(target=do_scan, args=(have_helper,), daemon=True).start()
-                next_scan = start + args.scan_every
-            time.sleep(max(0.0, args.interval - (time.time() - start)))
+                next_scan = start + scan_every
+            pause(start, args)
     except KeyboardInterrupt:
         print("stopped")
 

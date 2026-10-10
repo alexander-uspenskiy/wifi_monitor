@@ -229,8 +229,8 @@ def build_probes(info, control, row, step, scan, now=None, win=None):
     `row` the latest parsed sample, `step` the typical spacing of samples, `scan` (timestamp, networks) of the last scan."""
     now = now or dt.datetime.now()
     win = sys.platform.startswith("win") if win is None else win
-    interval = info.get("interval") or step or 5
-    scan_every = info.get("scan_every", 900)
+    interval = control.get("interval") or info.get("interval") or step or 5  # a value set on the dashboard wins over the command line
+    scan_every = control["scan_every"] if control.get("scan_every") is not None else info.get("scan_every", 900)
     host = info.get("host") or "1.1.1.1"
     gateway = info.get("gateway")
     last = row["t"] if row else None
@@ -269,19 +269,23 @@ def build_probes(info, control, row, step, scan, now=None, win=None):
     else:
         scan_res, scan_state, scan_every_text = ("%d networks" % scan[1] if scan else "no scan yet"), ("ok" if scan else "off"), every_text(scan_every)
 
+    # router ping, internet ping and Wi-Fi status share one sampling loop, so one setting covers all three
+    sample_control = {"key": "interval", "choices": list(logstore.INTERVAL_CHOICES), "override": control.get("interval"),
+                      "default": info.get("interval") or step or 5, "value": interval,
+                      "note": "one setting for the router, internet and Wi-Fi probes"}
     probes = [
         {"id": "router", "name": "Router ping", "what": "Is the router (first hop) answering, and how fast",
          "target": gateway or "default gateway", "method": "ICMP echo x1, 1 s timeout (" + ping % (gateway or "<router>") + ")",
-         "every": interval, "everyText": every_text(interval), "last": last, "ago": age, "result": gw_res, "state": gw_state,
+         "every": interval, "everyText": every_text(interval), "control": sample_control, "last": last, "ago": age, "result": gw_res, "state": gw_state,
          "traffic": "about 100 bytes per probe, to your router only"},
         {"id": "internet", "name": "Internet ping", "what": "Is the internet reachable through the router, and how fast",
          "target": host, "method": "ICMP echo x1, 1 s timeout (" + ping % host + ")",
-         "every": interval, "everyText": every_text(interval), "last": last, "ago": age, "result": net_res, "state": net_state,
+         "every": interval, "everyText": every_text(interval), "control": sample_control, "last": last, "ago": age, "result": net_res, "state": net_state,
          "traffic": "about 100 bytes per probe, to " + host},
         {"id": "wifi", "name": "Wi-Fi link status", "what": "Signal, noise, channel, band and link rate of your connection",
          "target": "this computer's Wi-Fi adapter",
          "method": "netsh wlan show interfaces" if win else "CoreWLAN helper (bin/wifi-info)",
-         "every": interval, "everyText": every_text(interval), "last": last, "ago": age, "result": wifi_res, "state": wifi_state,
+         "every": interval, "everyText": every_text(interval), "control": sample_control, "last": last, "ago": age, "result": wifi_res, "state": wifi_state,
          "traffic": "none (read locally)"},
         {"id": "gateway", "name": "Gateway lookup", "what": "Finds your router's address",
          "target": "this computer's routing table", "method": "route print -4 0.0.0.0" if win else "route -n get default",
@@ -290,7 +294,8 @@ def build_probes(info, control, row, step, scan, now=None, win=None):
         {"id": "scan", "name": "Nearby-network scan", "what": "How many networks share your channel, and which channels are quietest",
          "target": "Wi-Fi networks in range",
          "method": "netsh wlan show networks mode=bssid" if win else "CoreWLAN helper scan (bin/wifi-info scan)",
-         "every": scan_every or None, "everyText": scan_every_text, "last": scan[0] if scan else None, "ago": _ago(scan[0], now) if scan else None,
+         "every": scan_every or None, "everyText": scan_every_text, "control": {"key": "scan_every", "choices": list(logstore.SCAN_CHOICES), "override": control.get("scan_every"),
+                                                              "default": info.get("scan_every", 900), "value": scan_every or 0}, "last": scan[0] if scan else None, "ago": _ago(scan[0], now) if scan else None,
          "result": scan_res, "state": scan_state, "traffic": "none to the internet; the radio briefly leaves your channel, which can cost a ping"},
         {"id": "maintain", "name": "Log maintenance", "what": "Compresses older day files and deletes files past the retention period",
          "target": "the logs folder", "method": "local file operations", "every": None, "everyText": "at start and each new day",
@@ -386,13 +391,19 @@ class Handler(BaseHTTPRequestHandler):
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)  # detached: it ends this process too
             return
         if path == "/api/control":
-            paused = body.get("scan_paused")
-            if not isinstance(paused, bool):
-                return self._send(400, b"scan_paused must be true or false", "text/plain")
-            changed = logstore.read_control()["scan_paused"] != paused
-            ctl = logstore.write_control(scan_paused=paused)
-            if changed:
-                note_event("Scanning paused" if paused else "Scanning resumed")
+            # any of: scan_paused (true/false), interval (seconds between samples), scan_every (seconds between scans, 0 = off)
+            if not body or any(k not in logstore.CONTROL_DEFAULTS or not logstore.valid_control(k, v) for k, v in body.items()):
+                return self._send(400, ("expected one or more of scan_paused (true or false), interval (one of %s) and scan_every (one of %s)" % (
+                    list(logstore.INTERVAL_CHOICES), list(logstore.SCAN_CHOICES))).encode(), "text/plain")
+            before = logstore.read_control()
+            ctl = logstore.write_control(**body)
+            if before["scan_paused"] != ctl["scan_paused"]:
+                note_event("Scanning paused" if ctl["scan_paused"] else "Scanning resumed")
+            if before["interval"] != ctl["interval"]:
+                note_event("Probe interval set to %s s from the dashboard" % ctl["interval"] if ctl["interval"] else "Probe interval back to the command-line value")
+            if before["scan_every"] != ctl["scan_every"]:
+                note_event("Scan interval set to %s from the dashboard" % every_text(ctl["scan_every"]) if ctl["scan_every"] is not None
+                           else "Scan interval back to the command-line value")
             return self._send(200, json.dumps(ctl).encode(), "application/json")
         text = " ".join(str(body.get("text", "")).split())[:200]
         if not text:

@@ -181,7 +181,7 @@ Other environment variables:
 | `PORT` | `8765` | Dashboard port |
 | `PYTHON` | `python3` (`python` on Windows) | Interpreter used by the start scripts |
 
-The dashboard's own refresh rate is separate from these: set it with the menu in the dashboard header. The "What this app measures" card on the dashboard shows the settings in effect.
+These are the start-up values. The `--interval` and `--scan-every` periods can also be changed while running from the "What this app measures" card on the dashboard, which overrides them until you pick "start-up value" (see The dashboard). That card shows the settings in effect. The dashboard's own refresh rate is separate: set it with the menu in the dashboard header.
 
 Scans make the radio briefly leave its channel and can cause a slow or lost ping, or a roaming decision. In testing, about one scan in three was followed by a blip at a 5-minute interval, so the default is 15 minutes. Channel crowding changes slowly, so this still gives a good picture. Keep the interval long, use the Scanning switch on the dashboard, or use `--scan-every 0` during important calls.
 
@@ -198,6 +198,7 @@ Scans make the radio briefly leave its channel and can cause a slow or lost ping
 - **Measurement errors:** if a ping or the Wi-Fi status cannot be measured (not the same as a lost ping), the tiles show `ERR`, the status says "Measurement error", a banner explains why while it lasts, and the Events card and latency chart mark the start and the recovery. These samples are not counted as packet loss, outages or unavailability, and the Packet loss tile says how many were not measured.
 - **Refresh interval:** the "↻ every 5 s" menu in the header sets how often the page reloads its data from the local server: 2 s, 5 s, 10 s, 30 s, 1 min or paused. When paused, the footer offers "Refresh now". The choice is remembered in the browser. It only changes how often the page looks for new data. How often the collector measures is separate (`--interval`, see Configuration), so refreshing faster than the sample interval shows nothing new.
 - **Probes table:** the "What this app measures" card lists everything the collector does, with the target and the exact command, how often it runs, when it last ran, the last result, and how much network it uses. It shows the real settings, read from `logs/collector.json`, which the collector writes at start. If the collector is not running, the card says so. The table can be exported like the other cards.
+- **Changing probe intervals from the page:** the menus in the table's "Every" column retime the probes without restarting anything. The router, internet and Wi-Fi probes share one sampling loop, so one menu sets all three (2, 5, 10 or 15 s). Nearby-network scans can run every 5 min, 15 min, 30 min, 1 h or be turned off. A change applies within a few seconds, is noted in the Events card, and is remembered in `logs/control.json` until you change it again. "Start-up value" removes the override and returns to the `--interval` and `--scan-every` values the collector was started with. Samples slower than 15 s are not offered, because the charts treat a longer silence as missing data. The header's refresh menu is separate and only changes how often the page reloads.
 - **Stop button:** when the dashboard is served by the background service (see [Option 2](#option-2-background-service)), a **Stop** button with an (i) help icon appears in the header. It ends the collector and the dashboard. It does not appear when you started with `--terminal`.
 - **Scanning switch:** the "Scanning on" switch in the header pauses and resumes nearby-network scans without stopping the collector. Use it before an important call, because a scan briefly leaves your channel and can cost a lost ping. After you resume, the next scan waits a full interval. Each change is logged as a note, so pauses show up in the Events list. The setting is kept in `logs/control.json`, which the collector re-reads every sample.
 - **Theme:** the button in the header cycles Auto (follows your system), Light and Dark. Your choice is remembered in the browser.
@@ -219,7 +220,8 @@ logs/
   wifi-scan-2026-10-09.log          nearby-network scans
   service.log                       background service output (rotated, about 1.5 MB at most)
   service.pid                       process id of the running background service
-  collector.json                    the collector's current settings, read by the dashboard's probes table
+  collector.json                    the collector's start-up settings, read by the dashboard's probes table
+  control.json                      settings changed from the dashboard (scan switch, probe intervals)
 ```
 
 - A new file starts at midnight.
