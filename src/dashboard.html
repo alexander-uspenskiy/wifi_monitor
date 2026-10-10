@@ -178,6 +178,48 @@
   .credit a { color: var(--c1); text-decoration: none; }
   .credit a:hover { text-decoration: underline; }
   @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  /* Internet download speed card */
+  .spform { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 8px 12px; margin: 0 0 6px; }
+  .spform label { display: flex; flex-direction: column; gap: 3px; min-width: 0; color: var(--muted); font-size: 12px; }
+  .spform input, .spform select { min-height: var(--ctlh); padding: 4px 8px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); color: var(--text); font: inherit; max-width: 100%; }
+  .spform input:focus-visible, .spform select:focus-visible { outline: 2px solid var(--c1); outline-offset: 1px; }
+  .spform .spurl { flex: 1 1 280px; }
+  .spform .spurl input { width: 100%; }
+  .spform input[type="number"] { width: 84px; }
+  .spform button { min-height: var(--ctlh); padding: 4px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--card); color: var(--text); font: inherit; cursor: pointer; }
+  .spform button.go { background: var(--c1); border-color: var(--c1); color: #fff; }
+  .spform button:disabled { opacity: .5; cursor: not-allowed; }
+  .spform button:not(:disabled):hover { border-color: var(--c1); }
+  .spusage.warn { padding: 6px 10px; border-radius: 8px; border-left: 4px solid var(--warn); background: var(--bg); color: var(--text); }
+  .spmsg { min-height: 16px; margin: 0 0 6px; font-size: 12px; color: var(--muted); }
+  .spmsg.bad { color: var(--bad); }
+  .spmain { display: grid; grid-template-columns: minmax(220px, 300px) minmax(0, 1fr); gap: 12px 16px; align-items: center; margin-bottom: 10px; }
+  @media (max-width: 760px) { .spmain { grid-template-columns: 1fr; } }
+  .spgauge svg { display: block; width: 100%; max-width: 300px; margin: 0 auto; }
+  .spgauge .track { fill: none; stroke: var(--line); stroke-width: 10; stroke-linecap: round; }
+  .spgauge .arc { fill: none; stroke: var(--muted); stroke-width: 10; stroke-linecap: round; transition: stroke-dasharray .5s ease-out; }
+  .spgauge .tick { stroke: var(--muted); stroke-width: 1.2; }
+  .spgauge .tl { fill: var(--muted); font-size: 9px; text-anchor: middle; }
+  .spgauge .needle { stroke: var(--text); stroke-width: 2.4; stroke-linecap: round; }
+  .spgauge .nd { transform-origin: 120px 108px; transition: transform .6s ease-out; }
+  .spgauge .hub { fill: var(--text); }
+  .spgauge .val { fill: var(--text); font-size: 17px; font-weight: 650; text-anchor: middle; font-variant-numeric: tabular-nums; }
+  @media (prefers-reduced-motion: reduce) { .spgauge .arc, .spgauge .nd { transition: none; } }
+  .spcap { margin-top: 2px; text-align: center; color: var(--muted); font-size: 12px; }
+  .spbar { height: 4px; margin: 6px 0 0; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .spbar[hidden] { display: none; }
+  .spbar i { display: block; height: 100%; width: 0; background: var(--c1); transition: width .5s linear; }
+  #spStatus { margin: 6px 0 0; text-align: center; color: var(--muted); font-size: 12px; }
+  table.speed { font-size: 12px; }
+  table.speed th { padding: 4px 5px; white-space: normal; line-height: 1.25; vertical-align: bottom; }
+  table.speed td { padding: 5px 5px; }
+  table.speed td.l { white-space: normal; max-width: 260px; }
+  table.speed tbody tr { cursor: default; } table.speed tbody tr:hover { background: transparent; }
+  .spadv { margin-top: 10px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg); font-size: 12.5px; line-height: 1.45; }
+  .spadv h4 { margin: 0 0 4px; font-size: 12px; }
+  .spadv ul { margin: 0; padding-left: 18px; } .spadv li { margin: 3px 0; }
+  .spadv li.ok { color: var(--good); } .spadv li.warn::marker { color: var(--warn); } .spadv li.caveat { color: var(--muted); }
+  .spadv[hidden] { display: none; }
 </style>
 </head>
 <body>
@@ -213,6 +255,37 @@
     <div class="card full"><h2>Least crowded channels — average per scan in the selected window (fewer is better)<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="leastcrowded">i</span></h2>
       <div class="chart"><canvas id="cBlocks"></canvas></div>
       <div id="bestch" style="margin-top:8px"></div></div>
+    <div class="card full" id="speedCard"><h2>Internet download speed<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="speed">i</span></h2>
+      <div class="probeline">Single download from one server. Not a full speed test: it can read lower than your plan on fast connections.</div>
+      <form class="spform" id="spForm" novalidate>
+        <label class="spurl">Server address (optional)<input type="url" id="spUrl" maxlength="500" placeholder="Default: Cloudflare (speed.cloudflare.com)" autocomplete="off" spellcheck="false"></label>
+        <label>Size (MB)<input type="number" id="spMb" min="10" max="100" step="1" value="25"></label>
+        <label>Run<select id="spEvery"><option value="0">One time</option><option value="600">Every 10 min</option><option value="1800">Every 30 min</option><option value="3600">Every 1 hour</option></select></label>
+        <button type="button" id="spRun" disabled>Run now</button>
+        <button type="submit" class="go" id="spSave">Save</button>
+      </form>
+      <div class="probeline spusage" id="spUsage"></div>
+      <div class="spmsg" id="spMsg" role="status"></div>
+      <div class="spmain">
+        <div class="spgauge">
+          <svg id="spGauge" viewBox="0 0 240 135" role="img" aria-label="Download speed gauge">
+            <path class="track" d="M 42 108 A 78 78 0 0 1 198 108"/>
+            <path class="arc" d="M 42 108 A 78 78 0 0 1 198 108" pathLength="100" stroke-dasharray="0 100"/>
+            <g class="ticks"></g>
+            <g class="nd"><line class="needle" x1="120" y1="108" x2="58" y2="108"/></g>
+            <circle class="hub" cx="120" cy="108" r="5"/>
+            <text class="val" x="120" y="132">–</text>
+          </svg>
+          <div class="spcap" id="spCap">No test yet</div>
+          <div class="spbar" id="spBar" hidden><i></i></div>
+          <div id="spStatus" role="status"></div>
+        </div>
+        <div class="chart"><canvas id="cSpeed"></canvas></div>
+      </div>
+      <div class="tablewrap"><table class="days speed"><thead><tr>
+        <th>Finished</th><th>Speed</th><th>First byte</th><th>MB</th><th>Time</th><th>RSSI</th><th>SNR</th><th>Channel</th><th class="l">Result</th>
+      </tr></thead><tbody id="spBody"><tr><td colspan="9" style="color:var(--muted)">Loading…</td></tr></tbody></table></div>
+      <div class="spadv" id="spAdvice" hidden></div></div>
     <div class="card"><h2>Transmit rate (Mbps)<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="txchart">i</span></h2><div class="chart"><canvas id="cTx"></canvas></div></div>
     <div class="card"><h2>Events<span class="hint" tabindex="0" role="img" aria-label="More information" data-tip-key="events">i</span></h2>
       <form class="addev" id="evform"><input id="evtext" maxlength="200" placeholder="Add a note, e.g. moved to the living room" autocomplete="off"><button class="go" type="submit">Add</button></form>
@@ -253,7 +326,7 @@ const TIPS = {
   scan: "Pauses or resumes the nearby-network scans. A scan briefly leaves your channel and can cost a lost ping, so turn it off before important calls. Pings and signal keep being recorded either way.",
   stop: "Stops the background service: the collector and this dashboard both end, and your logs are kept. This page cannot start it again. To start: run ./service.sh start (macOS) or service.bat start (Windows) from the project folder. Use ./service.sh open to start it and open this page, or install to start it automatically at every login (uninstall turns that off). The button only appears when the service started this page. If you started with start.sh or start.bat, press Ctrl-C in that window instead.",
   refresh: "How often this page reloads its data from the local server. Pick a longer time to save battery, or Paused to freeze the page while you read it (the footer then offers Refresh now). The collector keeps taking samples either way: how often it samples is the Every column of the probes table, set with --interval. Refreshing faster than that shows nothing new. Your choice is remembered in this browser.",
-  probes: "Everything the collector measures, how often, and what it costs. The card starts collapsed: use the arrow or click the title to open it. The summary line shows the current settings. Use the menus in the Every column to retime the probes: the router, internet and Wi-Fi probes share one sampling interval (2 to 15 s), and scans run every 5 min to 1 h or not at all. A change applies within a few seconds, is noted in the Events card, and stays until you change it again; \"start-up value\" returns to the --interval and --scan-every flags. Slower sampling than 15 s is not offered because the charts treat longer silences as missing data. Pings go only to your router and the internet target, about 100 bytes each. Wi-Fi status and scans are read from your own adapter and use no internet traffic. Last run and Last result come from the latest logged sample, so a stale time means the collector is not running. The Dashboard refresh row is this page's own setting, in the header.",
+  probes: "Everything the collector measures, how often, and what it costs. The card starts collapsed: use the arrow or click the title to open it. The summary line shows the current settings. Use the menus in the Every column to retime the probes: the router, internet and Wi-Fi probes share one sampling interval (2 to 15 s), and scans run every 5 min to 1 h or not at all. A change applies within a few seconds, is noted in the Events card, and stays until you change it again; \"start-up value\" returns to the --interval and --scan-every flags. Slower sampling than 15 s is not offered because the charts treat longer silences as missing data. Pings go only to your router and the internet target, about 100 bytes each. The one exception is the Internet download speed test, which downloads 10 to 100 MB from a speed server, only when you press Run now or choose a schedule in its own card. Wi-Fi status and scans are read from your own adapter and use no internet traffic. Last run and Last result come from the latest logged sample, so a stale time means the collector is not running. The Dashboard refresh row is this page's own setting, in the header.",
   day: "Live shows a rolling window of recent data. Pick a day to see that whole day from the saved logs. Live refresh pauses for past days.",
   window: "How much recent history the charts and tiles cover in live view. Choosing one returns you from a past day to live view.",
   theme: "Cycles Auto (follows your system), Light and Dark. Remembered in this browser.",
@@ -265,12 +338,13 @@ const TIPS = {
   channel: "The Wi-Fi channel, band, channel width and standard you are connected on. A change means your computer or router switched channels or bands, which briefly interrupts the connection.",
   tx: "The speed the Wi-Fi link negotiated, in megabits per second. This is not your internet speed. It drops when the signal is weak or the channel is busy.",
   crowd: "How many other networks overlap your channel in the latest scan. Strong means a signal of -75 dBm or better. More strong neighbours means more waiting for airtime and lag spikes. The count includes your own router.",
-  latency: "Ping times to the router (blue) and the internet (orange) over time. Red crosses at the bottom are lost pings. Dots at the top mark your notes (blue), channel or band changes (purple) and outages (red shading), with grey ticks for scans. Hover a dot for details. Drag across the chart to select a range and analyse it. The table below lists each slow episode with its likely cause. Spikes on both lines point to Wi-Fi trouble. Spikes on the orange line only point beyond your router. Gaps mean nothing was logged.",
+  latency: "Ping times to the router (blue) and the internet (orange) over time. Red crosses at the bottom are lost pings. Dots at the top mark your notes (blue), channel or band changes (purple) and outages (red shading), with grey ticks for scans. Hover a dot for details. Drag across the chart to select a range and analyse it. The table below lists each slow episode with its likely cause. Spikes on both lines point to Wi-Fi trouble. Spikes on the orange line only point beyond your router. Gaps mean nothing was logged. Green shading marks an Internet download speed test: the pings taken during a test are slower because the test fills the connection, so they are drawn but left out of the stats and episodes.",
   signal: "Signal strength (RSSI) and the background noise level, in dBm. The wider the gap between the lines, the cleaner the link. Dips in signal usually mean distance or obstacles. Rising noise means interference. Drag across the chart to select a time range, shared with the latency chart.",
   snrchart: "The gap between signal and noise over time. The dashed line at 25 dB is the target for smooth calls. Drag across the chart to select a time range, shared with the latency chart.",
   sharing: "How many nearby networks overlap your channel at each scan (blue), and how many of those are strong (orange). Hover a point to see which channel you were on. Counts include your own router.",
   bychannel: "Number of networks seen on each channel in the latest scan. Your channel is green. Tall bars are crowded channels.",
   leastcrowded: "Average crowding of each channel block across the scans in the selected window. Fewer networks, especially strong ones, is better. DFS channels are often quiet, but the router must leave them if it detects radar, which can cause a brief disconnect.",
+  speed: "How fast one download from one server reaches this computer, in megabits per second (Mbps). Set the server (leave it empty for the default, Cloudflare), the size (10 to 100 MB) and how often it runs: one time means only when you press Run now. The collector downloads that many MB every time, so frequent tests use a lot of data (the estimate under the settings shows how much, and warns on a metered connection). It is a single stream from one server, not a full speed test: on a fast connection it can read lower than your plan. The gauge shows the live speed during a test and the last result after it. Bars are green close to your usual speed, orange below 80% and red below 50% of the median. A failed test is shown as ERR, never as 0. Tests are shaded green on the latency chart, and pings taken during a test are left out of the stats because the test itself fills the link. The Wi-Fi columns are the link at the moment the test started, so you can tell a weak Wi-Fi link from a slow internet connection.",
   txchart: "The negotiated Wi-Fi link speed over time. Frequent drops to low rates mean a weak or noisy link.",
   events: "A timeline of outages, channel or band changes, gaps where nothing was logged, and your own notes. Type a note when you change something (the quick buttons start a note for you) so you can compare before and after.",
   daily: "One row per day of logs. Click a row to open that day. Orange and red cells flag high loss, slow pings, or outages.",
@@ -388,6 +462,10 @@ const FIX = {
     router: [],
     isp: "When you report repeated drops to your ISP, send this table. Packet loss, 95th-percentile latency and outage minutes make a clear case." },
 };
+FIX.speed = {
+  you: ["Repeat the test a few times and at different times of day. One result says little, the pattern matters.", "Pause downloads, cloud sync, backups and video streams on the network while testing.", "Test once with an Ethernet cable. If it is much faster than Wi-Fi, the limit is your Wi-Fi: improve signal and SNR first (see those tiles).", "Move closer to the router and use 5 GHz."],
+  router: ["Set a less crowded 5 GHz channel (see Least crowded channels) and use 80 MHz width if the area is quiet.", "Turn on QoS or smart queue (SQM) if available, and update the firmware."],
+  isp: "If a cable test is also far below your plan, at several times of day, the line or the provider is the limit. Contact your ISP with this table. Keep in mind that this is one stream from one server: a plan of 500 Mbps or more often reads lower here than in a multi-stream speed test." };
 FIX.evcount = {
   you: ["Open the Events card to see what happened and when, and add a note for every change you make.", "Several channel or band changes: stop the hopping (see the Channel tile).", "Outages: restart the router, check cables, and work through the Packet loss tile."],
   router: ["Use a fixed channel, turn off band steering, and update the firmware."],
@@ -416,8 +494,8 @@ const fixBlock = key => {
 document.addEventListener('toggle', e => { const d = e.target; if (d.matches && d.matches('details.fix')) { if (d.open) openFix.add(d.dataset.fix); else openFix.delete(d.dataset.fix); } }, true);
 
 // ---- event markers on the latency chart and the "likely cause" analysis
-const markerVis = { notes: true, changes: true, outages: true, errors: true, scans: true };
-const MARKER_NAMES = { notes: 'Notes', changes: 'Channel/band changes', outages: 'Outages and gaps', errors: 'Measurement errors', scans: 'Scans' };
+const markerVis = { notes: true, changes: true, outages: true, errors: true, scans: true, speed: true };
+const MARKER_NAMES = { notes: 'Notes', changes: 'Channel/band changes', outages: 'Outages and gaps', errors: 'Measurement errors', scans: 'Scans', speed: 'Speed tests' };
 const markerColor = t => ({ notes: css('--c1'), changes: css('--c2'), outages: css('--bad'), errors: css('--warn'), scans: css('--muted') })[t];
 
 const markerPlugin = {
@@ -446,6 +524,26 @@ const markerPlugin = {
   },
 };
 
+// shades each Internet download speed test (start to finish, and the one running now) behind the latency lines
+const speedPlugin = {
+  id: 'speedTests',
+  beforeDatasetsDraw(chart) {
+    if (!markerVis.speed || !speedData) return;
+    const spans = (speedData.tests || []).map(t => [pT(String(t.start || '')), pT(String(t.t || ''))]);
+    const st = speedData.state;
+    if (st && st.running && st.id) spans.push([pT(String(st.id)), Date.now()]);
+    const { ctx, chartArea: a, scales: { x } } = chart;
+    ctx.save(); ctx.beginPath(); ctx.rect(a.left, a.top, a.right - a.left, a.bottom - a.top); ctx.clip();
+    ctx.globalAlpha = 0.10; ctx.fillStyle = css('--good');
+    for (const [s0, s1] of spans) {
+      if (!isFinite(s0) || !isFinite(s1)) continue;
+      const p0 = x.getPixelForValue(s0), p1 = x.getPixelForValue(s1);
+      ctx.fillRect(p0, a.top, Math.max(2, p1 - p0), a.bottom - a.top);
+    }
+    ctx.restore();
+  },
+};
+
 // the dragged or selected time range, drawn as a band on every chart that supports selection
 const bandPlugin = {
   id: 'band',
@@ -464,13 +562,16 @@ const bandPlugin = {
 
 // events the collector writes when it could not take a measurement (it is not packet loss), kept apart from the user's own notes
 const isMeasure = n => /^Measurement (error|recovered):/.test(n.text);
+// the collector reports repeated speed-test failures the same way; they say nothing about the ping or Wi-Fi measurements (no banner, not counted as ping errors)
+const isSpeedMeasure = n => /^Measurement (error|recovered): speed test( |$)/.test(n.text);
 
 function buildMarkers(rows) {
   const out = []; let down = null, prev = null, prevKey = null;
   for (const d of rows) {
     if (prev && d.x - prev.x > GAP_MS) out.push({ type: 'outages', kind: 'gap', x: prev.x, x1: d.x, text: `No data for ${fmtDur((d.x - prev.x) / 1000)} (collector stopped or computer asleep)` });
     const isDown = (d.gwLost && d.netLost) || d.assoc === false;
-    if (isDown && !down) down = { x: d.x };
+    if (d.speed) { /* a test fills the link: a lost ping now says nothing about an outage */ }
+    else if (isDown && !down) down = { x: d.x };
     else if (!isDown && down) { out.push({ type: 'outages', kind: 'outage', x: down.x, x1: d.x, text: `Outage: router and internet unreachable for about ${fmtDur((d.x - down.x) / 1000)}` }); down = null; }
     if (d.ch != null) {
       const k = `${d.ch} / ${d.band} GHz`;
@@ -493,7 +594,7 @@ function analyzeSpikes(rows, markers) {
   const spiky = d => d.gwLost || d.netLost || (d.gw != null && d.gw > 100) || (d.net != null && d.net > 200);
   const eps = []; let cur = null;
   for (const d of rows) {
-    if (!spiky(d)) continue;
+    if (d.speed || !spiky(d)) continue;  // pings during a speed test are slow on purpose
     if (cur && d.x - cur.end <= 15000) { cur.rows.push(d); cur.end = d.x; } else { cur = { start: d.x, end: d.x, rows: [d] }; eps.push(cur); }
   }
   const near = (type, e, pad) => markers.some(m => m.type === type && m.x >= e.start - pad && m.x <= e.end + pad);
@@ -528,7 +629,7 @@ function qualityStats(rows, xmin, xmax) {
   for (let i = 0; i + 1 < rows.length; i++) {
     const a = rows[i], b = rows[i + 1], dt = b.x - a.x;
     if (dt > GAP_MS) run = 0;
-    if (dt <= GAP_MS) {
+    if (dt <= GAP_MS && !a.speed) {  // an interval that starts during a speed test is not counted: the test itself loads the link
       gaps.push(dt);
       // a ping that could not be measured (ERR) is unknown, not down; a Wi-Fi disconnect is known whatever the pings say
       const off = a.assoc === false, gwBad = a.gwLost || off, netBad = a.netLost || off;
@@ -540,21 +641,21 @@ function qualityStats(rows, xmin, xmax) {
         seen += dt;
         if (anyBad) { down += dt; run += dt; longestDown = Math.max(longestDown, run); } else run = 0;
       } else run = 0;
-      if (a.net != null && b.net != null) jit.push(Math.abs(b.net - a.net));
+      if (a.net != null && b.net != null && !b.speed) jit.push(Math.abs(b.net - a.net));
     }
   }
   gaps.sort((x, y) => x - y);
   const step = gaps.length ? gaps[Math.floor(gaps.length / 2)] : 5000;
   // call-ready: share of samples meeting thresholds, and the longest run that did not
   const ready = d => d.gw != null && d.gw < 50 && d.net != null && d.net < 150 && !d.gwLost && !d.netLost && d.assoc !== false && (d.snr == null || d.snr >= 20);
-  const measured = rows.filter(d => !d.gwErr && !d.netErr);  // samples where both pings were actually taken
+  const measured = rows.filter(d => !d.gwErr && !d.netErr && !d.speed);  // samples where both pings were actually taken
   let ok = 0, runStart = null, runEnd = null, worst = 0;
   for (const d of measured) {
     if (ready(d)) { ok++; runStart = null; }
     else { if (runStart == null) runStart = d.x; runEnd = d.x; worst = Math.max(worst, runEnd - runStart + step); }
   }
   return {
-    outages: outages.length, changes, notes: noteN, longest, errors: mk.filter(m => m.type === 'errors' && m.text.startsWith('Measurement error')).length,
+    outages: outages.length, changes, notes: noteN, longest, errors: mk.filter(m => m.type === 'errors' && m.text.startsWith('Measurement error') && !isSpeedMeasure(m)).length,
     avail: seen ? 100 * (1 - down / seen) : null, availGw: seenGw ? 100 * (1 - gwDown / seenGw) : null, availNet: seenNet ? 100 * (1 - netDown / seenNet) : null, longestDown,
     jitter: jit.length ? jit.reduce((x, y) => x + y, 0) / jit.length : null, jitterP95: pct(jit, .95),
     call: measured.length ? 100 * ok / measured.length : null, worst: ok === measured.length ? 0 : worst,
@@ -611,7 +712,7 @@ function init() {
     line('Router (gateway)', css('--c1')),
     line('Internet (1.1.1.1)', css('--c3')),
     { label: 'Lost ping', data: [], showLine: false, pointStyle: 'crossRot', pointRadius: 6, borderWidth: 2, borderColor: css('--bad'), backgroundColor: css('--bad') },
-  ], { beginAtZero: true, suggestedMax: 100 }, {}, [markerPlugin, bandPlugin]);
+  ], { beginAtZero: true, suggestedMax: 100 }, {}, [markerPlugin, bandPlugin, speedPlugin]);
   charts.lat.options.plugins.tooltip.filter = () => !charts.lat.$markerHover;  // hide the data tooltip while a marker tooltip is showing
   charts.sig = mkChart('#cSig', [line('RSSI', css('--c1')), line('Noise', css('--muted'))], { suggestedMin: -100, suggestedMax: -40 }, {}, [bandPlugin]);
   charts.snr = mkChart('#cSnr', [
@@ -651,6 +752,29 @@ function init() {
     },
   });
   charts.tx = mkChart('#cTx', [line('Tx rate', css('--c3'), { stepped: true })], { beginAtZero: true });
+  charts.speed = new Chart($('#cSpeed'), {
+    type: 'bar',
+    data: { labels: [], datasets: [
+      { label: 'Download speed (Mbps)', data: [], backgroundColor: [], maxBarThickness: 44, borderRadius: 3 },
+      { type: 'line', label: 'Average', data: [], borderColor: css('--muted'), backgroundColor: css('--muted'), borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, pointHoverRadius: 0, tension: 0 },
+    ] },
+    options: {
+      animation: false, maintainAspectRatio: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { labels: { color: css('--muted'), boxWidth: 12 } },
+        tooltip: { callbacks: { label: c => {
+          if (c.datasetIndex === 1) return `Average ${fmtMbps(c.parsed.y)}`;
+          const t = (c.chart.$tests || [])[c.dataIndex];
+          return t && !speedOk(t) ? `ERR: ${t.reason || t.kind || 'failed'}` : `${fmtMbps(c.parsed.y)}${t && t.ttfb_ms != null ? ` · first byte ${Math.round(t.ttfb_ms)} ms` : ''}`;
+        } } },
+      },
+      scales: {
+        x: { ticks: { color: css('--muted'), maxRotation: 60, autoSkip: true, maxTicksLimit: 12, font: { size: 11 } }, grid: { display: false } },
+        y: { beginAtZero: true, title: { display: true, text: 'Mbps', color: css('--muted') }, ticks: { color: css('--muted') }, grid: { color: css('--grid') } },
+      },
+    },
+  });
 }
 
 // series with a break wherever samples are more than GAP_MS apart (sleep, logger stopped)
@@ -675,7 +799,8 @@ function events(rows) {
   for (const d of rows) {
     if (prev && d.x - prev.x > GAP_MS) ev.push({ x: prev.x, tag: 'warn', label: 'NO DATA', text: `Logger silent for ${fmtDur((d.x - prev.x) / 1000)} (Mac asleep or logger stopped)` });
     const down = (d.gwLost && d.netLost) || d.assoc === false;
-    if (down && !out) out = { start: d.x, last: d.x };
+    if (d.speed) { /* samples during a speed test are not outage evidence */ }
+    else if (down && !out) out = { start: d.x, last: d.x };
     else if (down && out) out.last = d.x;
     else if (!down && out) { ev.push({ x: out.start, tag: 'bad', label: 'OUTAGE', text: `Router and internet unreachable for ~${fmtDur((d.x - out.start) / 1000)}` }); out = null; }
     if (d.ch != null) {
@@ -689,6 +814,15 @@ function events(rows) {
   for (const n of notes) if ((!rows.length || n.x >= rows[0].x) && (!zoom || n.x <= zoom.b)) ev.push({ x: n.x, tag: 'info', label: 'NOTE', text: n.text });
   for (const n of merrs) if ((!rows.length || n.x >= rows[0].x) && (!zoom || n.x <= zoom.b)) ev.push({ x: n.x, tag: n.text.startsWith('Measurement error') ? 'warn' : 'info', label: n.text.startsWith('Measurement error') ? 'ERROR' : 'OK', text: n.text });
   return ev.sort((a, b) => b.x - a.x).slice(0, 15);
+}
+
+// Latency and loss figures for tiles and the selection panel. Samples taken during an Internet download speed test (speed) are drawn
+// on the charts but left out here, because the test itself fills the link and slows or drops pings.
+function latencyFigures(rows) {
+  const core = rows.filter(d => !d.speed);
+  return { core, gw: core.filter(d => d.gw != null).map(d => d.gw), net: core.filter(d => d.net != null).map(d => d.net),
+    gwLost: core.filter(d => d.gwLost).length, netLost: core.filter(d => d.netLost).length,
+    gwN: core.filter(d => !d.gwErr).length, netN: core.filter(d => !d.netErr).length, errN: core.filter(d => d.gwErr || d.netErr).length };
 }
 
 function render() {
@@ -710,25 +844,22 @@ function render() {
   if (zoom) st = [`Zoomed ${fmtTS(zoom.a)} – ${fmtTS(zoom.b)}`, 'c1'];
   else if (past) st = [`Viewing ${day}`, 'c1'];
   else if (stale) st = ['No recent data — is the logger running?', 'warn'];
-  else if (last.assoc === false || (last.gwLost && last.netLost)) st = ['Down', 'bad'];
+  else if (last.assoc === false || (!last.speed && last.gwLost && last.netLost)) st = ['Down', 'bad'];
   else if (last.gwErr || last.netErr || last.wifiErr) st = ['Measurement error', 'warn'];
-  else if (last.gwLost || last.netLost || (last.snr != null && last.snr < 20) || (last.rssi != null && last.rssi < -72) || (last.net != null && last.net > 150)) st = ['Degraded', 'warn'];
+  else if ((!last.speed && (last.gwLost || last.netLost || (last.net != null && last.net > 150))) || (last.snr != null && last.snr < 20) || (last.rssi != null && last.rssi < -72)) st = ['Degraded', 'warn'];
   $('#status').textContent = st[0]; $('#dot').style.background = css('--' + st[1]);
   // a measurement that could not be taken is a tool or system problem, not Wi-Fi loss: say so prominently while it lasts
   const mb = $('#mbanner'), errNow = !past && !zoom && !stale && last && (last.gwErr || last.netErr || last.wifiErr);
   mb.hidden = !errNow;
   if (errNow) {
     const what = [last.gwErr && 'router ping', last.netErr && 'internet ping', last.wifiErr && 'Wi-Fi status'].filter(Boolean).join(', ');
-    const why = merrs.filter(n => n.text.startsWith('Measurement error')).pop();
+    const why = merrs.filter(n => n.text.startsWith('Measurement error') && !isSpeedMeasure(n)).pop();
     mb.textContent = `Measurement problem: ${what} could not be measured on the latest sample. ` + (why ? why.text.replace(/^Measurement error: /, '') : 'These samples are not counted as packet loss or a disconnect. See logs/service.log.');
   }
 
   // tiles
-  const gwOk = rows.filter(d => d.gw != null).map(d => d.gw);
-  const netOk = rows.filter(d => d.net != null).map(d => d.net);
-  const gwLost = rows.filter(d => d.gwLost).length, netLost = rows.filter(d => d.netLost).length;
   // loss is a share of the pings that were actually taken; samples where a ping could not be measured (ERR) are left out
-  const gwN = rows.filter(d => !d.gwErr).length, netN = rows.filter(d => !d.netErr).length, errN = rows.filter(d => d.gwErr || d.netErr).length;
+  const { core, gw: gwOk, net: netOk, gwLost, netLost, gwN, netN, errN } = latencyFigures(rows);
   const lp = (n, N) => N ? (100 * n / N).toFixed(1) + '%' : '–';
   const sev = (v, warn, bad) => v == null ? '' : v >= bad ? css('--bad') : v >= warn ? css('--warn') : css('--good');
   const rs = (last && last.rssi != null) ? last.rssi : null;
@@ -737,7 +868,7 @@ function render() {
   $('#tiles').innerHTML = [
     tile(past || zoom ? 'Router (last)' : 'Router now', last && last.gw != null ? f1(last.gw) + ' ms' : (last && last.gwLost ? 'LOST' : last && last.gwErr ? 'ERR' : '–'), `median ${f1(pct(gwOk, .5))} · p95 ${f1(pct(gwOk, .95))} ms`, last && last.gwLost ? css('--bad') : last && last.gwErr ? css('--warn') : sev(last && last.gw, 50, 150)),
     tile(past || zoom ? 'Internet (last)' : 'Internet now', last && last.net != null ? f1(last.net) + ' ms' : (last && last.netLost ? 'LOST' : last && last.netErr ? 'ERR' : '–'), `median ${f1(pct(netOk, .5))} · p95 ${f1(pct(netOk, .95))} ms`, last && last.netLost ? css('--bad') : last && last.netErr ? css('--warn') : sev(last && last.net, 100, 200)),
-    tile('Packet loss', lp(netLost, netN), `router ${lp(gwLost, gwN)} · internet ${lp(netLost, netN)}` + (errN ? ` · ${errN} not measured` : ''), sev(netN ? 100 * netLost / netN : null, 1, 5)),
+    tile('Packet loss', lp(netLost, netN), `router ${lp(gwLost, gwN)} · internet ${lp(netLost, netN)}` + (errN ? ` · ${errN} not measured` : '') + (core.length < rows.length ? ` · ${rows.length - core.length} during speed tests left out` : ''), sev(netN ? 100 * netLost / netN : null, 1, 5)),
     tile('Signal (RSSI)', rs != null ? rs + ' dBm' : 'n/a', last && last.noise != null ? `noise ${last.noise} dBm` : (rs != null ? 'noise not reported' : ''), rs == null ? '' : rs <= -75 ? css('--bad') : rs <= -67 ? css('--warn') : css('--good')),
     tile('SNR', last && last.snr != null ? last.snr + ' dB' : 'n/a', last && last.snr != null ? 'aim for 25+' : 'not reported here', last && last.snr != null ? (last.snr < 15 ? css('--bad') : last.snr < 25 ? css('--warn') : css('--good')) : ''),
     tile('Channel', last && last.ch != null ? `${last.ch}` : 'n/a', last && last.ch != null ? [`${last.band} GHz`, last.width != null ? `${last.width} MHz` : null, last.phy ? `802.${last.phy}` : null].filter(Boolean).join(' · ') : ''),
@@ -880,6 +1011,7 @@ async function load() {
     try { const ev = (await (await fetch('/api/events' + q, { cache: 'no-store' })).json()).map(d => ({ ...d, x: pT(d.t) })); notes = ev.filter(n => !isMeasure(n)); merrs = ev.filter(isMeasure); } catch (e) { notes = []; merrs = []; }
     render();
     loadProbes();
+    loadSpeed();
     if (Date.now() - daysAt > 60000) loadDays();
     loadControl();
   } catch (e) {
@@ -935,7 +1067,7 @@ $('#probesbody').addEventListener('change', async e => {
 function probeRows() {
   const rows = probeData ? probeData.probes.slice() : [];
   rows.push({ id: 'refresh', name: 'Dashboard refresh', what: 'This page re-reading the logs from the local server', target: 'the dashboard server on this computer',
-    method: 'GET /api/data, /api/scan, /api/events, /api/probes', every: refreshSec || null, everyText: refreshSec ? fmtEvery(refreshSec) : 'off (paused)',
+    method: 'GET /api/data, /api/scan, /api/events, /api/probes, /api/speed', every: refreshSec || null, everyText: refreshSec ? fmtEvery(refreshSec) : 'off (paused)',
     last: null, ago: null, result: refreshSec ? 'live' : 'paused', state: refreshSec ? 'ok' : 'off', traffic: 'none (localhost only)', note: 'adjustable in the header' });
   return rows;
 }
@@ -977,6 +1109,205 @@ function probesSummary(d) {
 $('#probesHead').addEventListener('click', e => { if (e.target.closest('.hint')) return; hideTip(); setProbesOpen(!probesOpen, true); });
 setProbesOpen(probesOpen, false);
 
+// ---- Internet download speed card: one download from one server (see the card's hint). The collector does the work; this page sets it up and shows /api/speed.
+function speedScale(mbps) {  // gauge full-scale: the smallest of 100, 250, 500, 1000 Mbps that fits the value
+  const v = Number(mbps);
+  if (mbps == null || !isFinite(v)) return 100;
+  return [100, 250, 500].find(s => v <= s) || 1000;
+}
+function needleAngle(mbps, scale) {  // 0 (left) to 180 (right) degrees
+  const v = Number(mbps), s = Number(scale);
+  if (mbps == null || !isFinite(v) || v <= 0 || !(s > 0)) return 0;
+  return Math.min(180, 180 * v / s);
+}
+const fmtMbps = v => v == null || !isFinite(v) ? '–' : v >= 100 ? `${Math.round(v)} Mbps` : `${(Math.round(v * 10) / 10).toFixed(1)} Mbps`;
+const speedOk = t => !!t && t.ok === true && t.mbps != null && isFinite(t.mbps);  // a failed test (ERR) is never a number
+function speedMedian(tests) {
+  const v = (tests || []).filter(speedOk).map(t => t.mbps).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+const speedBarColor = (v, median) => v == null || !isFinite(v) ? 'muted' : median == null || !(median > 0) || v >= 0.8 * median ? 'good' : v >= 0.5 * median ? 'warn' : 'bad';
+function speedUsage(mb, every) {  // how much data the chosen size and schedule download
+  if (!(mb > 0)) return { perDayMB: 0, perMonthGB: 0, text: '', warn: false };
+  const perDayMB = every > 0 ? mb * 86400 / every : 0, perMonthGB = perDayMB * 30 / 1000, warn = perDayMB >= 1000;
+  const size = x => x >= 1000 ? `${+(x / 1000).toFixed(1)} GB` : `${Math.round(x)} MB`;
+  const text = every > 0
+    ? `Uses about ${size(perDayMB)} per day (${+perMonthGB.toFixed(1)} GB per month) at this setting.` + (warn ? ' That is a lot on a metered or capped connection, such as a mobile hotspot or a data plan: choose a longer interval or a smaller size.' : '')
+    : `Downloads ${mb} MB only when you press Run now. Nothing runs by itself.`;
+  return { perDayMB, perMonthGB, text, warn };
+}
+function speedStats(tests) {  // failed tests count in n but never in the speeds
+  const ts = tests || [], ok = ts.filter(speedOk), v = ok.map(t => t.mbps);
+  const avg = v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
+  const sd = v.length > 1 ? Math.sqrt(v.reduce((a, b) => a + (b - avg) * (b - avg), 0) / v.length) : null;
+  return { n: ts.length, okN: ok.length, last: ok.length ? ok[ok.length - 1].mbps : null, median: speedMedian(ts),
+    min: v.length ? Math.min(...v) : null, max: v.length ? Math.max(...v) : null, avg, cv: sd != null && avg > 0 ? sd / avg : null };
+}
+// What the results suggest. keys name the findings, messages are the matching texts plus a final single-stream caveat (so one more message than keys).
+// link is the Wi-Fi block of the last good test (rssi, snr, tx: any may be null, Windows has no snr); leave it out to take it from the tests.
+function speedAdvice(tests, link) {
+  const ts = tests || [], st = speedStats(ts);
+  if (!ts.length) return { keys: [], messages: [] };
+  const lastOk = [...ts].reverse().find(speedOk) || null, w = link === undefined ? (lastOk && lastOk.wifi) : link;
+  const snr = w && w.snr != null ? w.snr : null, rssi = w && w.rssi != null ? w.rssi : null, tx = w && w.tx > 0 ? w.tx : null;
+  const known = snr != null || rssi != null;
+  const weak = known && ((snr != null && snr < 25) || (rssi != null && rssi < -70));
+  const good = known && (snr == null || snr >= 25) && (rssi == null || rssi >= -67);
+  const keys = [], messages = [], add = (k, m) => { keys.push(k); messages.push(m); };
+  const linkText = [rssi != null ? `signal ${rssi} dBm` : '', snr != null ? `SNR ${snr} dB` : ''].filter(Boolean).join(', ');
+  if (lastOk) {
+    const v = lastOk.mbps;
+    if (weak) add('wifi_weak', `The Wi-Fi link was weak when the last test started (${linkText}), so Wi-Fi is probably holding the speed back. Move closer to the router or use 5 GHz, then test again.`);
+    if (good && tx != null && v < 0.35 * tx) add('below_link', `The last test (${fmtMbps(v)}) is far below what your Wi-Fi link negotiated (${tx} Mbps) while the signal was good. The limit is probably beyond your Wi-Fi: your internet plan, your provider or the test server. Compare with an Ethernet cable and at another time of day.`);
+    if (good && tx == null && v < 50) add('good_link_slow', `The Wi-Fi link looked healthy (${linkText}) but the last test reached only ${fmtMbps(v)}. If your plan is faster, the limit is probably the internet connection or the test server rather than Wi-Fi. Try another server address, or compare with a cable.`);
+  }
+  if (st.okN >= 5 && (st.min <= 0 || st.max / st.min > 2 || st.cv > 0.35)) add('variance', `Results swing a lot (from ${fmtMbps(st.min)} to ${fmtMbps(st.max)}). That usually means interference or congestion that comes and goes: check Least crowded channels, and what else is using the network at those times.`);
+  if (lastOk && lastOk.ttfb_ms > 500 && lastOk.mbps >= 5) add('ttfb_high', `The server took ${Math.round(lastOk.ttfb_ms)} ms to send its first byte in the last test. A slow start points to a distant or busy server, or a congested connection, rather than the download speed itself.`);
+  if (!st.okN || (ts.length >= 3 && ts.slice(-3).every(t => !speedOk(t)))) add('all_failed', st.okN ? 'The latest 3 tests failed. Read the reason in the table: a wrong or blocked server address, no internet, or a proxy or certificate problem. Try another server address.' : 'No test has finished successfully yet. Read the reason in the table: a wrong or blocked server address, no internet, or a proxy or certificate problem.');
+  if (!keys.length) add('ok', 'Nothing stands out: the speed looks steady and the Wi-Fi link was healthy.');
+  messages.push('This is a single download from one server, so on a fast connection it can read lower than your plan. Compare with an Ethernet cable or another speed test before blaming your provider.');
+  return { keys, messages };
+}
+
+let speedUrlEdited = false, speedData = null, speedBusy = false, speedPrevRunning = false, speedWatchUntil = 0, speedDirty = false, speedPosting = false, speedTimer = null, gaugeMax = 0, speedMsgTimer = null;
+const speedWhen = (t, withDate, secs) => { const s = String(t || ''); return withDate ? `${s.slice(5, 10)} ${s.slice(11, 16)}` : s.slice(11, secs ? 19 : 16); };
+
+async function loadSpeed() {
+  if (speedBusy || window.stopped) return;
+  speedBusy = true;
+  try {
+    const r = await fetch('/api/speed' + (day ? `?day=${day}` : ''), { cache: 'no-store' });
+    const j = r.ok ? await r.json() : null;
+    speedData = j && typeof j === 'object' && !Array.isArray(j) ? j : null;  // a 404 or empty answer: the card says "no data yet"
+  } catch (e) { /* server busy or unreachable: keep what is shown */ }
+  speedBusy = false;
+  const running = !!(speedData && speedData.state && speedData.state.running);
+  renderSpeed();
+  if (charts.lat) charts.lat.draw();
+  clearTimeout(speedTimer); speedTimer = null;  // follow a running test closely, otherwise the normal refresh rate is enough
+  if (!window.stopped && !document.hidden && (running || Date.now() < speedWatchUntil)) speedTimer = setTimeout(loadSpeed, 1000);
+  const finished = speedPrevRunning && !running;
+  speedPrevRunning = running;
+  if (finished) load();  // picks up the events and the flagged samples
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) loadSpeed(); });
+
+function renderGauge(v, running, median) {
+  const g = $('#spGauge'); if (!g) return;
+  const scale = speedScale(running ? Math.max(gaugeMax, v || 0) : v), angle = needleAngle(v, scale);
+  if (g.dataset.scale !== String(scale)) {
+    g.dataset.scale = String(scale);
+    g.querySelector('.ticks').innerHTML = [0, 1, 2, 3, 4, 5].map(i => {
+      const a = Math.PI * i / 5, c = Math.cos(a), s = Math.sin(a), P = r => `${(120 - r * c).toFixed(1)}`, Q = r => `${(108 - r * s).toFixed(1)}`;
+      return `<line class="tick" x1="${P(83)}" y1="${Q(83)}" x2="${P(88)}" y2="${Q(88)}"/><text class="tl" x="${P(97)}" y="${(+Q(97) + 3).toFixed(1)}">${Math.round(scale * i / 5)}</text>`;
+    }).join('');
+  }
+  g.querySelector('.nd').style.transform = `rotate(${angle}deg)`;
+  const arc = g.querySelector('.arc');
+  arc.setAttribute('stroke-dasharray', `${(100 * angle / 180).toFixed(1)} 100`);
+  arc.style.stroke = running ? 'var(--c1)' : `var(--${speedBarColor(v, median)})`;
+  g.querySelector('.val').textContent = v == null ? '–' : fmtMbps(v);
+}
+function renderSpeedUsage() {
+  const el = $('#spUsage'), mb = +$('#spMb').value, every = +$('#spEvery').value;
+  const bad = !Number.isInteger(mb) || mb < 10 || mb > 100;
+  const u = bad ? { text: 'The size must be a whole number from 10 to 100 MB.', warn: true } : speedUsage(mb, every);
+  el.textContent = u.text; el.classList.toggle('warn', !!u.warn);
+}
+function setSpeedMsg(text, isErr) {
+  const el = $('#spMsg'); el.textContent = text; el.classList.toggle('bad', !!isErr);
+  clearTimeout(speedMsgTimer);
+  if (text && !isErr) speedMsgTimer = setTimeout(() => { el.textContent = ''; }, 8000);
+}
+function renderSpeed() {
+  const d = speedData, st = (d && d.state) || {}, s = (d && d.settings) || {}, coll = d && d.collector;
+  const tests = d && Array.isArray(d.tests) ? d.tests : [], running = !!st.running, stats = speedStats(tests);
+  const ae = document.activeElement;
+  if (d && !speedDirty && !(ae && ['INPUT', 'SELECT'].includes(ae.tagName) && $('#spForm').contains(ae))) {  // never overwrite what is being typed
+    $('#spUrl').value = s.url || '';
+    $('#spUrl').title = s.url && !/^https?:\/\//i.test(s.url) ? 'Only the server name is shown here, because this page was not opened from this computer. Type a full address to replace it.' : ''; if (s.mb != null) $('#spMb').value = s.mb; if (s.every != null) $('#spEvery').value = String(s.every);
+  }
+  renderSpeedUsage();
+  const run = $('#spRun'), noColl = !coll || !coll.running;
+  run.disabled = !d || noColl || running || speedPosting;
+  run.title = !d ? 'Speed data is not available from the dashboard server yet' : noColl ? 'The collector is not running, so nothing will happen. Start it first' : running ? 'A test is already running' : 'Run one download test now. It uses the size set here.';
+  // gauge: the live rate while a test runs, otherwise the last good result
+  gaugeMax = running ? Math.max(gaugeMax, st.mbps || 0) : 0;
+  const shown = running ? (st.mbps != null ? st.mbps : 0) : stats.last;
+  renderGauge(shown, running, stats.median);
+  const lastOk = [...tests].reverse().find(speedOk);
+  $('#spCap').textContent = running ? `Testing now (${st.trigger === 'scheduled' ? 'scheduled' : 'manual'})` : lastOk ? `Last test ${speedWhen(lastOk.t, String(lastOk.t).slice(0, 10) !== todayStr(), true)}${stats.okN > 1 ? ` · median ${fmtMbps(stats.median)} · best ${fmtMbps(stats.max)}` : ''}` : d ? 'No successful test yet' : 'No data yet';
+  const bar = $('#spBar'), pctDone = running && st.target_bytes > 0 ? Math.min(100, 100 * (st.bytes || 0) / st.target_bytes) : 0;
+  bar.hidden = !running; bar.firstElementChild.style.width = pctDone + '%';
+  const host = st.host || 'the server';
+  let text;
+  if (!d) text = 'No data yet: the dashboard server did not provide speed data. If you just updated WiFiMonitor, restart the service.';
+  else if (running) text = st.phase === 'connecting' || !st.bytes ? `Connecting to ${host}…` : `Downloading from ${host}: ${(st.bytes / 1e6).toFixed(1)} of ${((st.target_bytes || 0) / 1e6).toFixed(1)} MB · ${(st.elapsed_s || 0).toFixed(1)} s`;
+  else if (noColl) text = st.phase === 'stale' ? 'The last test stopped without finishing and the collector is not running. Start it first.' : 'The collector is not running, so nothing will happen. Start it first.';
+  else if (st.phase === 'stale') text = 'The running test stopped reporting progress. If it does not finish, press Run now to try again.';
+  else if (st.next_at) text = `Next automatic test at about ${fmtTS(pT(st.next_at))}`;
+  else text = s.every ? 'The next automatic test is scheduled.' : 'One-time mode: a test runs only when you press Run now.';
+  $('#spStatus').textContent = text;
+
+  const multiDay = new Set(tests.map(t => String(t.t || '').slice(0, 10))).size > 1;
+  const ch = charts.speed;
+  if (ch) {
+    ch.$tests = tests;
+    ch.data.labels = tests.map(t => speedWhen(t.t, multiDay) + (speedOk(t) ? '' : ' ✕'));
+    ch.data.datasets[0].data = tests.map(t => speedOk(t) ? t.mbps : null);
+    ch.data.datasets[0].backgroundColor = tests.map(t => css('--' + speedBarColor(speedOk(t) ? t.mbps : null, stats.median)));
+    ch.data.datasets[1].data = stats.avg == null ? [] : tests.map(() => +stats.avg.toFixed(2));
+    ch.update('none');
+  }
+  const cell = (v, suffix = '') => v == null ? '–' : v + suffix;
+  $('#spBody').innerHTML = !d ? '<tr><td colspan="9" style="color:var(--muted)">No data yet.</td></tr>'
+    : !tests.length ? '<tr><td colspan="9" style="color:var(--muted)">No tests yet. Press Run now, or choose a schedule and Save.</td></tr>'
+    : tests.slice(-15).reverse().map(t => {
+      const ok = speedOk(t), w = t.wifi || {}, c = speedBarColor(ok ? t.mbps : null, stats.median);
+      const title = escHtml(`started ${t.start || '?'} · ${t.trigger || ''}${t.host ? ' · ' + t.host : ''}`);
+      return `<tr><td title="${title}">${escHtml(speedWhen(t.t, multiDay, true))}</td>`
+        + (ok ? `<td class="${c === 'muted' ? '' : c}"><b>${fmtMbps(t.mbps)}</b></td>` : '<td class="bad">ERR</td>')
+        + `<td>${cell(t.ttfb_ms != null ? Math.round(t.ttfb_ms) : null, ' ms')}</td><td>${cell(t.bytes != null ? +(t.bytes / 1e6).toFixed(1) : null)}</td><td>${cell(t.dur_s != null ? +(+t.dur_s).toFixed(1) : null, ' s')}</td>`
+        + `<td>${cell(w.rssi, ' dBm')}</td><td>${cell(w.snr, ' dB')}</td><td>${w.ch != null ? escHtml(`${w.ch}${w.band ? ' · ' + w.band + ' GHz' : ''}`) : '–'}</td>`
+        + (ok ? `<td class="l" style="color:var(--good)">OK${t.status ? ' ' + escHtml(t.status) : ''}${t.capped ? ' (stopped at 60 s)' : ''}</td>`
+               : `<td class="l bad" title="${escHtml(t.reason || '')}">${escHtml(t.reason || t.kind || 'failed')}</td>`) + '</tr>';
+    }).join('');
+  const adv = d ? speedAdvice(tests, undefined) : { keys: [], messages: [] }, box = $('#spAdvice');
+  box.hidden = !adv.messages.length;
+  box.innerHTML = adv.messages.length ? '<h4>What this suggests</h4><ul>' + adv.messages.map((m, i) => `<li class="${i < adv.keys.length ? (adv.keys[i] === 'ok' ? 'ok' : 'warn') : 'caveat'}">${escHtml(m)}</li>`).join('') + '</ul>' : '';
+}
+async function speedPost(body, okText) {
+  speedPosting = true; renderSpeed(); setSpeedMsg('');
+  let ok = false;
+  try {
+    const r = await fetch('/api/control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) {
+      const t = (await r.text()).trim().slice(0, 800);
+      setSpeedMsg(t || (r.status === 403 ? `Forbidden: open the dashboard at http://127.0.0.1:${location.port || 80} or http://localhost:${location.port || 80} to change speed settings.` : `The server answered ${r.status}.`), true);
+    }
+    else { ok = true; setSpeedMsg(okText); }
+  } catch (e) { setSpeedMsg('Could not reach the dashboard server (is it running?)', true); }
+  speedPosting = false;
+  return ok;
+}
+for (const ev of ['input', 'change']) $('#spForm').addEventListener(ev, e => { speedDirty = true; if (e.target.id === 'spUrl') speedUrlEdited = true; renderSpeedUsage(); });
+$('#spForm').addEventListener('submit', async e => {
+  e.preventDefault();
+  // the server shows only the host of the address to a page opened from another computer: never send that back, only an address the user typed
+  const body = { speed_mb: +$('#spMb').value, speed_every: +$('#spEvery').value };
+  if (speedUrlEdited) body.speed_url = $('#spUrl').value.trim() || null;
+  if (await speedPost(body, 'Saved. The collector applies it within a few seconds.')) { speedDirty = false; speedUrlEdited = false; await loadSpeed(); load(); }
+  else renderSpeed();
+});
+$('#spRun').addEventListener('click', async () => {
+  const dirty = speedDirty;
+  if (await speedPost({ speed_run: true }, 'Requested. The collector starts the test within a few seconds' + (dirty ? ', with the saved settings (your edits are not saved yet).' : '.'))) {
+    speedWatchUntil = Date.now() + 30000; await loadSpeed(); load();
+  } else renderSpeed();
+});
+
 const CHIPS = ['Changed router setting', 'Reconnected to Wi-Fi', 'Switched network', 'Moved location', 'Joined call', 'Left call', 'Restarted router'];
 $('#chips').innerHTML = CHIPS.map(c => `<button type="button">${c}</button>`).join('');
 async function addEvent(text) {
@@ -1017,7 +1348,7 @@ function applyTheme(t) {
   $('#themeBtn').textContent = THEME_LABEL[t];
   try { localStorage.setItem('theme', t); } catch (e) { /* storage blocked */ }
 }
-function rebuildCharts() { Object.values(charts).forEach(c => c.destroy()); charts = {}; init(); render(); }
+function rebuildCharts() { Object.values(charts).forEach(c => c.destroy()); charts = {}; init(); render(); renderSpeed(); }
 $('#themeBtn').addEventListener('click', () => { applyTheme(THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length]); rebuildCharts(); });
 window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => { if (theme === 'auto') rebuildCharts(); });
 applyTheme(theme);
@@ -1043,8 +1374,8 @@ function renderSel() {
   const buttons = zoom ? '<button class="go" data-act="reset">Reset zoom</button>' : '<button class="go" data-act="zoom">Zoom all charts to this range</button><button data-act="clear">Clear</button>';
   const head = `<div class="selhead"><b>${zoom ? 'Zoomed' : 'Selected'}: ${fmtTS(r.a)} – ${fmtTS(r.b)} (${fmtDur((r.b - r.a) / 1000)})</b>${buttons}</div>`;
   if (!rs.length) { box.innerHTML = head + '<div class="hintline">No samples in this range.</div>'; return; }
-  const gw = rs.filter(d => d.gw != null).map(d => d.gw), net = rs.filter(d => d.net != null).map(d => d.net);
-  const loss = k => (100 * rs.filter(d => d[k]).length / rs.length).toFixed(1) + '%';
+  const { core: rc, gw, net } = latencyFigures(rs);  // speed-test samples are left out of the latency and loss figures
+  const loss = k => rc.length ? (100 * rc.filter(d => d[k]).length / rc.length).toFixed(1) + '%' : '–';
   const avg = k => { const v = rs.map(d => d[k]).filter(v => v != null); return v.length ? Math.round(v.reduce((x, y) => x + y, 0) / v.length * 10) / 10 : null; };
   const mx = a => a.length ? f1(Math.max(...a)) : '–';
   const marks = buildMarkers(rs).filter(m => m.x >= r.a && m.x <= r.b);
@@ -1102,7 +1433,7 @@ for (const [cvId, key, topStrip] of [['#cLat', 'lat', 14], ['#cSig', 'sig', 0], 
   cv.addEventListener('pointerup', finish); cv.addEventListener('pointercancel', finish);
 }
 
-$('#mkchips').innerHTML = Object.keys(MARKER_NAMES).map(k => `<button type="button" data-mk="${k}" title="Show or hide ${MARKER_NAMES[k].toLowerCase()} on the latency chart"><span class="sw" style="background:var(--${{ notes: 'c1', changes: 'c2', outages: 'bad', scans: 'muted' }[k]})"></span>${MARKER_NAMES[k]}</button>`).join('');
+$('#mkchips').innerHTML = Object.keys(MARKER_NAMES).map(k => `<button type="button" data-mk="${k}" title="Show or hide ${MARKER_NAMES[k].toLowerCase()} on the latency chart"><span class="sw" style="background:var(--${{ notes: 'c1', changes: 'c2', outages: 'bad', scans: 'muted', speed: 'good' }[k]})"></span>${MARKER_NAMES[k]}</button>`).join('');
 $('#mkchips').addEventListener('click', e => {
   const b = e.target.closest('button'); if (!b) return;
   markerVis[b.dataset.mk] = !markerVis[b.dataset.mk]; b.classList.toggle('off', !markerVis[b.dataset.mk]);
@@ -1140,7 +1471,7 @@ function rangeBounds() {
 }
 const inR = (x, r) => x >= r.a && x <= r.b;
 const EXPORTS = {
-  latency: r => ({ cols: ['time', 'router_ms', 'internet_ms', 'router_lost', 'internet_lost', 'router_error', 'internet_error'], rows: all.filter(d => inR(d.x, r)).map(d => [d.t, d.gw, d.net, d.gwLost ? 1 : 0, d.netLost ? 1 : 0, d.gwErr ? 1 : 0, d.netErr ? 1 : 0]) }),
+  latency: r => ({ cols: ['time', 'router_ms', 'internet_ms', 'router_lost', 'internet_lost', 'router_error', 'internet_error', 'during_speed_test'], rows: all.filter(d => inR(d.x, r)).map(d => [d.t, d.gw, d.net, d.gwLost ? 1 : 0, d.netLost ? 1 : 0, d.gwErr ? 1 : 0, d.netErr ? 1 : 0, d.speed ? 1 : 0]) }),
   signal: r => ({ cols: ['time', 'rssi_dbm', 'noise_dbm'], rows: all.filter(d => inR(d.x, r) && d.rssi != null).map(d => [d.t, d.rssi, d.noise]) }),
   snrchart: r => ({ cols: ['time', 'snr_db', 'rssi_dbm', 'noise_dbm'], rows: all.filter(d => inR(d.x, r) && d.rssi != null).map(d => [d.t, d.snr, d.rssi, d.noise]) }),
   txchart: r => ({ cols: ['time', 'tx_mbps', 'channel', 'band_ghz', 'width_mhz', 'standard'], rows: all.filter(d => inR(d.x, r) && d.rssi != null).map(d => [d.t, d.tx, d.ch, d.band, d.width, d.phy]) }),
@@ -1162,13 +1493,16 @@ const EXPORTS = {
                    m.x1 != null ? new Date(m.x1 - new Date(m.x1).getTimezoneOffset() * 60000).toISOString().slice(0, 19).replace('T', ' ') : null,
                    m.type === 'outages' ? (m.kind === 'gap' ? 'gap' : 'outage') : m.type === 'changes' ? 'channel_change' : m.type === 'errors' ? 'measurement' : 'note', m.text]) };
   },
+  speed: r => ({ cols: ['finished', 'started', 'trigger', 'result', 'mbps', 'first_byte_ms', 'megabytes', 'duration_s', 'server', 'http_status', 'error_kind', 'error_reason', 'rssi_dbm', 'snr_db', 'channel', 'band_ghz', 'link_tx_mbps'],
+    rows: ((speedData && speedData.tests) || []).filter(t => inR(pT(String(t.t || '')), r)).map(t => { const w = t.wifi || {}, ok = speedOk(t);
+      return [t.t, t.start, t.trigger, ok ? 'ok' : 'error', ok ? t.mbps : null, t.ttfb_ms, t.bytes != null ? +(t.bytes / 1e6).toFixed(2) : null, t.dur_s, t.host, t.status, t.kind, t.reason, w.rssi, w.snr, w.ch, w.band, w.tx]; }) }),
   probes: () => ({ cols: ['probe', 'what_it_checks', 'target', 'method', 'every_seconds', 'last_run', 'last_result', 'network_use'],
     rows: probeRows().map(p => [p.name, p.what, p.target, p.method, p.every, p.last, p.result, p.traffic]) }),
   daily: () => ({ cols: ['day', 'samples', 'router_loss_pct', 'internet_loss_pct', 'router_p95_ms', 'internet_p95_ms', 'internet_median_ms', 'outage_min', 'band_channel_changes', 'avg_rssi_dbm', 'avg_snr_db', 'notes', 'measurement_error_samples'],
     rows: days.map(d => [d.day, d.samples, d.gwLoss, d.netLoss, d.gwP95, d.netP95, d.netMedian, d.outageMin, d.changes, d.rssi, d.snr, d.notes.join(' | '), d.errSamples]) }),
 };
-const EXPORT_CHART = { latency: 'lat', signal: 'sig', snrchart: 'snr', txchart: 'tx', sharing: 'crowd', bychannel: 'ch', leastcrowded: 'blocks' };
-const EXPORT_NAME = { latency: 'latency', signal: 'signal', snrchart: 'snr', txchart: 'tx-rate', sharing: 'channel-sharing', bychannel: 'channels-nearby', leastcrowded: 'least-crowded', events: 'events', daily: 'daily-summary', probes: 'probes' };
+const EXPORT_CHART = { latency: 'lat', signal: 'sig', snrchart: 'snr', txchart: 'tx', sharing: 'crowd', bychannel: 'ch', leastcrowded: 'blocks', speed: 'speed' };
+const EXPORT_NAME = { latency: 'latency', signal: 'signal', snrchart: 'snr', txchart: 'tx-rate', sharing: 'channel-sharing', bychannel: 'channels-nearby', leastcrowded: 'least-crowded', speed: 'download-speed', events: 'events', daily: 'daily-summary', probes: 'probes' };
 
 function download(blob, name) {
   const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;

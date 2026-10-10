@@ -3,6 +3,7 @@
 Files live in <project>/logs (override with WIFI_LOG_DIR):
     wifi-monitor-YYYY-MM-DD.log   one line per sample, plus EVENT notes
     wifi-scan-YYYY-MM-DD.log      one line per nearby-network scan
+    wifi-speed-YYYY-MM-DD.log     one line per internet download speed test
 
 Today's file is plain text. Older files are gzip-compressed, and files older than
 WIFI_LOG_KEEP_DAYS (default 14) are deleted. Readers handle both .log and .log.gz.
@@ -13,11 +14,13 @@ import json
 import os
 import re
 import threading
+import time
+from urllib.parse import urlsplit
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LOG_DIR = os.environ.get("WIFI_LOG_DIR") or os.path.join(ROOT, "logs")
 KEEP_DAYS = int(os.environ.get("WIFI_LOG_KEEP_DAYS", "14"))
-KINDS = ("monitor", "scan")
+KINDS = ("monitor", "scan", "speed")
 
 _write_lock = threading.Lock()
 _cache = {}
@@ -91,7 +94,31 @@ CONTROL_FILE = os.path.join(LOG_DIR, "control.json")
 # about 15 s apart, so slower sampling is not offered.
 INTERVAL_CHOICES = (2, 5, 10, 15)               # seconds between samples (router ping, internet ping, Wi-Fi status)
 SCAN_CHOICES = (0, 300, 900, 1800, 3600)        # seconds between nearby-network scans, 0 = off
-CONTROL_DEFAULTS = {"scan_paused": False, "interval": None, "scan_every": None}
+SPEED_EVERY_CHOICES = (0, 600, 1800, 3600)      # seconds between download speed tests, 0 = one time (Run now only)
+SPEED_MB_MIN, SPEED_MB_MAX, SPEED_MB_DEFAULT = 10, 100, 25  # megabytes (1 MB = 1,000,000 bytes) downloaded per test
+SPEED_URL_MAX = 500
+SPEED_DEFAULT_URL = "https://speed.cloudflare.com/__down?bytes={bytes}"
+# speed_url None = the default server. speed_run is a millisecond stamp: a new value means "run a test now" (the collector ignores the one it saw at start-up).
+CONTROL_DEFAULTS = {"scan_paused": False, "interval": None, "scan_every": None,
+                    "speed_url": None, "speed_mb": SPEED_MB_DEFAULT, "speed_every": 0, "speed_run": None}
+
+
+def _plain_int(value):
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def valid_speed_url(value):
+    """An http(s) address of up to SPEED_URL_MAX characters: no spaces or control characters, a host name and no user:password@."""
+    if not isinstance(value, str) or not value or len(value) > SPEED_URL_MAX or not value.isascii():
+        return False
+    if any(ch.isspace() or ord(ch) < 32 or ord(ch) == 127 or ch in '"<>\\^`' for ch in value):  # never valid in an address, and not worth sending
+        return False
+    try:
+        parts = urlsplit(value)
+        parts.port  # raises ValueError for http://host:abc/ and ports above 65535
+        return parts.scheme in ("http", "https") and bool(parts.hostname) and "@" not in parts.netloc
+    except ValueError:
+        return False
 
 
 def valid_control(key, value):
@@ -101,19 +128,38 @@ def valid_control(key, value):
         return value is None or (isinstance(value, (int, float)) and not isinstance(value, bool) and value in INTERVAL_CHOICES)
     if key == "scan_every":
         return value is None or (isinstance(value, (int, float)) and not isinstance(value, bool) and value in SCAN_CHOICES)
+    if key == "speed_url":
+        return value is None or valid_speed_url(value)
+    if key == "speed_mb":
+        return _plain_int(value) and SPEED_MB_MIN <= value <= SPEED_MB_MAX
+    if key == "speed_every":
+        return _plain_int(value) and value in SPEED_EVERY_CHOICES  # None is not valid: one time is 0
+    if key == "speed_run":
+        return value is None or (_plain_int(value) and value >= 0)
     return False
+
+
+class Control(dict):
+    """The control settings. `ok` is False when the file exists but could not be read (busy, damaged), so the values are only defaults;
+    a missing file is normal and counts as ok."""
+    ok = True
 
 
 def read_control():
     """Runtime switches shared by the dashboard and the collector (re-read every sample). Invalid values fall back to the default."""
+    ok = True
     try:
         with open(CONTROL_FILE, encoding="utf-8") as f:
             data = json.load(f)
+    except FileNotFoundError:
+        data = {}
     except (OSError, ValueError):
-        data = {}
+        data, ok = {}, False
     if not isinstance(data, dict):
-        data = {}
-    return {k: (data[k] if k in data and valid_control(k, data[k]) else default) for k, default in CONTROL_DEFAULTS.items()}
+        data, ok = {}, False
+    ctl = Control({k: (data[k] if k in data and valid_control(k, data[k]) else default) for k, default in CONTROL_DEFAULTS.items()})
+    ctl.ok = ok
+    return ctl
 
 
 def write_control(**changes):
@@ -141,6 +187,36 @@ def write_info(info):
 def read_info():
     try:
         with open(INFO_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def speed_file():
+    return os.path.join(LOG_DIR, "speed.json")  # looked up at call time, so tests can point LOG_DIR elsewhere
+
+
+def write_speed_progress(data, tries=1):
+    """Progress of the running download speed test, for the dashboard. Best effort: a failed write is skipped (`tries` > 1 retries it,
+    for the final write, which a reader on Windows can briefly block)."""
+    for attempt in range(tries):
+        try:
+            os.makedirs(LOG_DIR, exist_ok=True)
+            tmp = speed_file() + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(tmp, speed_file())
+            return True
+        except OSError:
+            if attempt + 1 < tries:
+                time.sleep(0.05)
+    return False
+
+
+def read_speed_progress():
+    try:
+        with open(speed_file(), encoding="utf-8") as f:
             data = json.load(f)
         return data if isinstance(data, dict) else {}
     except (OSError, ValueError):

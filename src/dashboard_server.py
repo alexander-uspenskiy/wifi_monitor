@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
@@ -55,6 +56,7 @@ def parse(line):
         "width": num(kv.get("width")),
         "tx": num(kv.get("tx")),
         "phy": kv.get("phy"),
+        "speed": kv.get("speed") == "1",  # taken while a download speed test ran: drawn, but not counted in the statistics
     }
 
 
@@ -90,16 +92,21 @@ def _avg(vals):
     return round(sum(vals) / len(vals), 1) if vals else None
 
 
+# download speed test events and its measurement-error events are shown in the speed card, not as daily-summary notes
+QUIET_NOTES = ("Speed test", "Measurement error: speed test", "Measurement recovered: speed test")
+
+
 def summarize(rows, notes):
     """Per-day statistics shown in the dashboard's daily summary table."""
-    n = len(rows)
-    gw = [r["gw"] for r in rows if r["gw"] is not None]
-    net = [r["net"] for r in rows if r["net"] is not None]
+    core = [r for r in rows if not r.get("speed")]  # samples taken during a speed test say nothing about the link when idle
+    n = len(core)
+    gw = [r["gw"] for r in core if r["gw"] is not None]
+    net = [r["net"] for r in core if r["net"] is not None]
     outage, changes, prev_key = 0, 0, None
-    for i, r in enumerate(rows):
+    for i, r in enumerate(core):
         down = (r["gwLost"] and r["netLost"]) or not r["assoc"]
         if down and i + 1 < n:
-            outage += min(_secs(rows[i + 1]["t"]) - _secs(r["t"]), 30)
+            outage += min(_secs(core[i + 1]["t"]) - _secs(r["t"]), 30)
         if r["ch"] is not None:
             key = (r["ch"], r["band"])
             if prev_key and key != prev_key:
@@ -107,17 +114,17 @@ def summarize(rows, notes):
             prev_key = key
     # loss is a share of the pings that could be measured; samples with an ERR for that target are left out
     def pct(k, err):
-        ok = [r for r in rows if not r[err]]
+        ok = [r for r in core if not r[err]]
         return round(100 * sum(1 for r in ok if r[k]) / len(ok), 1) if ok else None
     return {
-        "samples": n,
+        "samples": len(rows), "speedSamples": len(rows) - n,
         "gwLoss": pct("gwLost", "gwErr"), "netLoss": pct("netLost", "netErr"),
         "errSamples": sum(1 for r in rows if r["gwErr"] or r["netErr"] or r["wifiErr"]),
         "gwP95": _pct(gw, .95), "netP95": _pct(net, .95), "netMedian": _pct(net, .5),
         "outageMin": round(outage / 60, 1), "changes": changes,
         "rssi": _avg([r["rssi"] for r in rows if r["rssi"] is not None]),
         "snr": _avg([r["snr"] for r in rows if r["snr"] is not None]),
-        "notes": [x["text"] for x in notes],
+        "notes": [x["text"] for x in notes if not x["text"].startswith(QUIET_NOTES)],
     }
 
 
@@ -207,6 +214,82 @@ def read_scans(day=None):
     return out
 
 
+def read_speed(day=None, limit=50):
+    """Download speed tests, oldest first: the whole `day`, or the newest `limit` (1 to 500). Each carries "t", the time it finished."""
+    limit = max(1, min(500, limit))
+    out = []
+    for line in (logstore.read_day("speed", day) if day else logstore.read_lines("speed", limit)):
+        m = LINE.match(line.strip())
+        if not m:
+            continue
+        try:
+            j = json.loads(m.group(2))
+        except ValueError:
+            continue
+        if isinstance(j, dict):
+            out.append({**j, "t": m.group(1)})
+    return out
+
+
+SPEED_STATE = {"running": False, "phase": "idle", "id": None, "trigger": None, "host": None, "mb": None, "target_bytes": None, "bytes": 0,
+               "elapsed_s": None, "mbps": None, "avg_mbps": None, "ttfb_ms": None, "next_at": None, "updated": None}
+SPEED_STALE_S = 5  # a running test refreshes its progress file twice a second; silence means the collector died
+
+
+def read_speed_state(now):
+    """The running test's progress (logs/speed.json), idle when there is none, "stale" when a running one stopped reporting."""
+    data = logstore.read_speed_progress()
+    state = {k: data.get(k, default) for k, default in SPEED_STATE.items()}
+    state["running"] = state["running"] is True
+    if state["phase"] not in ("connecting", "downloading", "done", "error", "idle"):
+        state["phase"] = "idle"
+    if not data:
+        state["phase"] = "idle"
+    if state["running"]:
+        upd = state["updated"]
+        if isinstance(upd, bool) or not isinstance(upd, (int, float)) or now.timestamp() - upd > SPEED_STALE_S:
+            state["running"], state["phase"] = False, "stale"
+    return state
+
+
+def latest_sample():
+    for line in reversed(logstore.read_lines("monitor", 50)):
+        r = parse(line)
+        if r:
+            return r
+    return None
+
+
+def shown_url(url, local):
+    """A custom speed address may carry a token. Only a request addressed to 127.0.0.1 or localhost gets all of it, anything else
+    (a page reaching this server through DNS rebinding) gets just the host name."""
+    return url if local or not url else urlsplit(url).hostname
+
+
+def read_speed_api(day=None, limit=50, now=None, local=True):
+    now = now or dt.datetime.now()
+    ctl = logstore.read_control()
+    info = logstore.read_info()
+    interval = ctl.get("interval") or info.get("interval") or 5
+    row = latest_sample()
+    age = _ago(row["t"], now) if row else None
+    tests = read_speed(day, limit)
+    used = tests if day else read_speed(now.strftime("%Y-%m-%d"))  # data use is that of the whole day, not of the newest few tests
+    every, mb = ctl["speed_every"], ctl["speed_mb"]
+    per_day = mb * 86400 / every if every else 0
+    return {
+        "now": now.strftime("%Y-%m-%d %H:%M:%S"), "day": day,
+        "settings": {"url": shown_url(ctl["speed_url"], local), "defaultUrl": logstore.SPEED_DEFAULT_URL, "mb": mb, "every": every, "run": ctl["speed_run"],
+                     "limits": {"mbMin": logstore.SPEED_MB_MIN, "mbMax": logstore.SPEED_MB_MAX, "every": list(logstore.SPEED_EVERY_CHOICES),
+                                "urlMax": logstore.SPEED_URL_MAX}},
+        "collector": {"running": age is not None and age <= max(30, 4 * interval), "ago": age},
+        "state": read_speed_state(now),
+        "tests": tests,
+        "usage": {"estimatedMbPerDay": round(per_day, 1), "estimatedGbPerMonth": round(per_day * 30 / 1000, 1),
+                  "actualMb": round(sum(t.get("bytes") or 0 for t in used) / 1e6, 1), "actualTests": len(used)},
+    }
+
+
 def every_text(sec):
     if not sec:
         return "off"
@@ -224,9 +307,10 @@ def _ago(ts, now):
         return None
 
 
-def build_probes(info, control, row, step, scan, now=None, win=None):
+def build_probes(info, control, row, step, scan, now=None, win=None, speed=None):
     """The table of what the collector measures and how often. `info` is the collector's own settings file (may be empty),
-    `row` the latest parsed sample, `step` the typical spacing of samples, `scan` (timestamp, networks) of the last scan."""
+    `row` the latest parsed sample, `step` the typical spacing of samples, `scan` (timestamp, networks) of the last scan,
+    `speed` the newest download speed test (as read_speed returns it) or None."""
     now = now or dt.datetime.now()
     win = sys.platform.startswith("win") if win is None else win
     interval = control.get("interval") or info.get("interval") or step or 5  # a value set on the dashboard wins over the command line
@@ -237,6 +321,16 @@ def build_probes(info, control, row, step, scan, now=None, win=None):
     age = _ago(last, now) if last else None
     running = age is not None and age <= max(30, 4 * interval)
     ping = "ping -n 1 -w 1000 %s" if win else "ping -c 1 -W 1000 %s"
+    if isinstance(speed, list):
+        speed = speed[-1] if speed else None
+    sp_mb, sp_every = control.get("speed_mb") or logstore.SPEED_MB_DEFAULT, control.get("speed_every") or 0
+    sp_host = urlsplit(control.get("speed_url") or logstore.SPEED_DEFAULT_URL).hostname
+    if not speed:
+        sp_res, sp_state = "no test yet", "off"
+    elif speed.get("ok"):
+        sp_res, sp_state = "%.1f Mbps" % speed["mbps"], "ok"
+    else:
+        sp_res, sp_state = "ERR (%s)" % (speed.get("reason") or "could not be measured"), "warn"
 
     def ping_result(ms, lost, err):
         if row is None:
@@ -297,6 +391,13 @@ def build_probes(info, control, row, step, scan, now=None, win=None):
          "every": scan_every or None, "everyText": scan_every_text, "control": {"key": "scan_every", "choices": list(logstore.SCAN_CHOICES), "override": control.get("scan_every"),
                                                               "default": info.get("scan_every", 900), "value": scan_every or 0}, "last": scan[0] if scan else None, "ago": _ago(scan[0], now) if scan else None,
          "result": scan_res, "state": scan_state, "traffic": "none to the internet; the radio briefly leaves your channel, which can cost a ping"},
+        {"id": "speed", "name": "Internet download speed", "what": "Single-stream download from one server, to see how fast data reaches this computer",
+         "target": sp_host, "method": "HTTP GET of %d MB (Range: bytes=0-%d; the default server takes the size in the address)" % (sp_mb, sp_mb * 1000000 - 1),
+         "every": sp_every or None, "everyText": every_text(sp_every) if sp_every else "one time (Run now only)", "last": speed["t"] if speed else None,
+         "ago": _ago(speed["t"], now) if speed else None, "result": sp_res, "state": sp_state,
+         "traffic": ("about %d MB per test, about %d MB per day at this setting" % (sp_mb, sp_mb * 86400 / sp_every) if sp_every
+                     else "about %d MB per test, only when you press Run now" % sp_mb),
+         "note": "set in the Internet download speed card", "control": None},
         {"id": "maintain", "name": "Log maintenance", "what": "Compresses older day files and deletes files past the retention period",
          "target": "the logs folder", "method": "local file operations", "every": None, "everyText": "at start and each new day",
          "last": None, "ago": None, "result": "keeps %d days" % logstore.KEEP_DAYS, "state": "ok", "traffic": "none"},
@@ -322,12 +423,17 @@ def read_probes():
                 break
             except ValueError:
                 continue
-    return build_probes(logstore.read_info(), logstore.read_control(), rows[-1] if rows else None, step, scan)
+    speed = read_speed(None, 1)
+    return build_probes(logstore.read_info(), logstore.read_control(), rows[-1] if rows else None, step, scan, speed=speed[-1] if speed else None)
 
 
 def note_event(text):
     when = dt.datetime.now()
     logstore.append("monitor", f"{when:%Y-%m-%d %H:%M:%S} EVENT {text}", when)
+
+
+def local_host_header(host):
+    return host in (f"127.0.0.1:{PORT}", f"localhost:{PORT}")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -351,8 +457,16 @@ class Handler(BaseHTTPRequestHandler):
             self._send(200, json.dumps(read_events(day)).encode(), "application/json")
         elif path == "/api/scan":
             self._send(200, json.dumps(read_scans(day)).encode(), "application/json")
+        elif path == "/api/speed":
+            try:
+                limit = int((parse_qs(parts.query).get("limit") or [50])[0])
+            except ValueError:
+                limit = 50
+            self._send(200, json.dumps(read_speed_api(day, limit, local=local_host_header(self.headers.get("Host", "")))).encode(), "application/json")
         elif path == "/api/control":
-            self._send(200, json.dumps(logstore.read_control()).encode(), "application/json")
+            ctl = dict(logstore.read_control())
+            ctl["speed_url"] = shown_url(ctl["speed_url"], local_host_header(self.headers.get("Host", "")))
+            self._send(200, json.dumps(ctl).encode(), "application/json")
         elif path == "/api/probes":
             self._send(200, json.dumps(read_probes()).encode(), "application/json")
         elif path == "/api/service":
@@ -391,12 +505,21 @@ class Handler(BaseHTTPRequestHandler):
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs)  # detached: it ends this process too
             return
         if path == "/api/control":
-            # any of: scan_paused (true/false), interval (seconds between samples), scan_every (seconds between scans, 0 = off)
-            if not body or any(k not in logstore.CONTROL_DEFAULTS or not logstore.valid_control(k, v) for k, v in body.items()):
-                return self._send(400, ("expected one or more of scan_paused (true or false), interval (one of %s) and scan_every (one of %s)" % (
-                    list(logstore.INTERVAL_CHOICES), list(logstore.SCAN_CHOICES))).encode(), "text/plain")
+            # any of: scan_paused (true/false), interval (seconds between samples), scan_every (seconds between scans, 0 = off),
+            # speed_url, speed_mb, speed_every (download speed test) and speed_run (true = run one now)
+            if any(k.startswith("speed_") for k in body) and not local_host_header(host):
+                return self._send(403, (f"forbidden: open the dashboard at http://127.0.0.1:{PORT} or http://localhost:{PORT} to change speed settings").encode(),
+                                  "text/plain")  # the speed test moves up to 100 MB: not for a page reaching localhost through DNS rebinding
+            if not body or any(k not in logstore.CONTROL_DEFAULTS or not (v is True if k == "speed_run" else logstore.valid_control(k, v)) for k, v in body.items()):
+                return self._send(400, ("expected one or more of scan_paused (true or false), interval (one of %s) and scan_every (one of %s); "
+                                        "speed_url (an http or https address of up to %d characters, or null for the default), speed_mb (%d to %d), "
+                                        "speed_every (one of %s) and speed_run (true)" % (
+                    list(logstore.INTERVAL_CHOICES), list(logstore.SCAN_CHOICES), logstore.SPEED_URL_MAX, logstore.SPEED_MB_MIN, logstore.SPEED_MB_MAX,
+                    list(logstore.SPEED_EVERY_CHOICES))).encode(), "text/plain")
             before = logstore.read_control()
-            ctl = logstore.write_control(**body)
+            # "Run now" is a fresh stamp, always newer than the last one, because the collector acts on a change of the value
+            changes = {k: max(int(time.time() * 1000), (before["speed_run"] or 0) + 1) if k == "speed_run" else v for k, v in body.items()}
+            ctl = logstore.write_control(**changes)
             if before["scan_paused"] != ctl["scan_paused"]:
                 note_event("Scanning paused" if ctl["scan_paused"] else "Scanning resumed")
             if before["interval"] != ctl["interval"]:
@@ -404,6 +527,16 @@ class Handler(BaseHTTPRequestHandler):
             if before["scan_every"] != ctl["scan_every"]:
                 note_event("Scan interval set to %s from the dashboard" % every_text(ctl["scan_every"]) if ctl["scan_every"] is not None
                            else "Scan interval back to the command-line value")
+            if before["speed_url"] != ctl["speed_url"]:
+                note_event("Speed test server set to %s from the dashboard" % urlsplit(ctl["speed_url"]).hostname if ctl["speed_url"]
+                           else "Speed test server back to the default (%s)" % urlsplit(logstore.SPEED_DEFAULT_URL).hostname)
+            if before["speed_mb"] != ctl["speed_mb"]:
+                note_event("Speed test size set to %d MB" % ctl["speed_mb"])
+            if before["speed_every"] != ctl["speed_every"]:
+                note_event("Speed test set to run every %s" % every_text(ctl["speed_every"]) if ctl["speed_every"] else "Speed test set to run one time (Run now only)")
+            if "speed_run" in body:
+                note_event("Speed test requested from the dashboard")
+            ctl["speed_url"] = shown_url(ctl["speed_url"], local_host_header(host))
             return self._send(200, json.dumps(ctl).encode(), "application/json")
         text = " ".join(str(body.get("text", "")).split())[:200]
         if not text:
