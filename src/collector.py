@@ -3,20 +3,28 @@
 
 Every few seconds it pings the router and the internet and records the Wi-Fi link
 details (signal, noise, channel, band, rate). Every few minutes it scans nearby
-networks. Output goes to daily-rotated files in logs/ (see logstore.py).
+networks, and on request (or on a schedule) it measures the internet download speed.
+Output goes to daily-rotated files in logs/ (see logstore.py).
 """
 import argparse
 import concurrent.futures as cf
 import datetime as dt
+import ipaddress
 import json
 import os
 import platform
 import re
 import shutil
+import socket
+import ssl
 import subprocess
 import sys
 import threading
 import time
+import urllib.error
+import urllib.request
+from collections import deque
+from urllib.parse import urlsplit
 
 import logstore
 
@@ -288,6 +296,301 @@ def do_scan(have_mac_helper):
     logstore.append("scan", "%s %s" % (when.strftime("%Y-%m-%d %H:%M:%S"), payload), when)
 
 
+def run_scan(gate, have_mac_helper):
+    try:
+        do_scan(have_mac_helper)
+    finally:
+        gate.end_scan()
+
+
+# ---------------------------------------------------------------- internet download speed
+
+SPEED_SETTLE_S = 5          # a scan and a speed test never start within this many seconds of each other
+SPEED_CAP_S = 60            # a test that is still downloading after this long is stopped, and still counts
+SPEED_CHUNK = 65536
+SPEED_PROGRESS_S = 0.5      # how often the running test writes logs/speed.json
+SPEED_CONNECT_TIMEOUT = 15  # also the longest wait for any single piece of data
+SPEED_HEARTBEAT_S = 0.5     # while a test runs, logs/speed.json is refreshed at least this often, even when no data arrives (slow DNS, stalled link)
+SPEED_MIN_BYTES = 1000000   # a download that ended early with less than this cannot be measured
+SPEED_MIN_S = 0.2           # a measured download shorter than this cannot be measured
+
+
+class Gate:
+    """A scan makes the radio leave the channel and a speed test fills the link: they must not overlap, nor follow each other closely.
+    `now` (monotonic seconds) can be passed in by tests."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.scanning = self.speeding = False
+        self.scan_end = self.speed_end = None
+
+    def _settled(self, since, now):
+        return since is None or now - since >= SPEED_SETTLE_S
+
+    def try_begin_scan(self, now=None):
+        now = time.monotonic() if now is None else now
+        with self.lock:
+            if self.scanning or self.speeding or not self._settled(self.speed_end, now):
+                return False
+            self.scanning = True
+            return True
+
+    def end_scan(self, now=None):
+        with self.lock:
+            self.scanning, self.scan_end = False, time.monotonic() if now is None else now
+
+    def try_begin_speed(self, now=None):
+        now = time.monotonic() if now is None else now
+        with self.lock:
+            if self.scanning or self.speeding or not self._settled(self.scan_end, now):
+                return False
+            self.speeding = True
+            return True
+
+    def end_speed(self, now=None):
+        with self.lock:
+            self.speeding, self.speed_end = False, time.monotonic() if now is None else now
+
+    def speed_overlaps(self, since_monotonic):
+        """Is a speed test running, or did one end after `since_monotonic`? Such a sample's pings are not representative."""
+        with self.lock:
+            return self.speeding or (self.speed_end is not None and self.speed_end >= since_monotonic)
+
+
+def log_event(text):
+    when = dt.datetime.now()
+    logstore.append("monitor", "%s EVENT %s" % (when.strftime("%Y-%m-%d %H:%M:%S"), text), when)
+    print(text, flush=True)
+
+
+def speed_request(url, mb):
+    """The GET for one test. The default server takes the size in the address; any other gets a Range header (and a server that
+    ignores it is simply read for mb MB and then closed)."""
+    n = int(mb) * 1000000
+    custom = bool(url) and url != logstore.SPEED_DEFAULT_URL
+    req = urllib.request.Request((url if custom else logstore.SPEED_DEFAULT_URL).replace("{bytes}", str(n)))
+    req.add_header("Accept-Encoding", "identity")
+    req.add_header("Cache-Control", "no-cache")
+    req.add_header("User-Agent", "WiFiMonitor/1")
+    if custom:
+        req.add_header("Range", "bytes=0-%d" % (n - 1))
+    return req
+
+
+def speed_host(url):
+    try:
+        return urlsplit(url or logstore.SPEED_DEFAULT_URL).hostname
+    except ValueError:
+        return None
+
+
+def local_host(host):
+    """Is `host` this computer or its link-local network (localhost, 127.x, ::1, 169.254.x, fe80::)? Names are not resolved."""
+    host = (host or "").lower().rstrip(".")
+    if host == "localhost" or host.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host.split("%")[0])
+    except ValueError:
+        return False
+    ip = getattr(ip, "ipv4_mapped", None) or ip
+    return ip.is_loopback or ip.is_link_local
+
+
+class SafeRedirect(urllib.request.HTTPRedirectHandler):
+    """Follows at most 3 redirects, and only to an http or https address with a host name (never file:, ftp: or user:password@).
+    It does not downgrade https to http, and a server on the internet cannot send the download to this computer or its local
+    network (127.x, ::1, 169.254.x): that is only followed when the address being redirected from is itself local."""
+    max_redirections = 3
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        try:
+            old, new = urlsplit(req.full_url), urlsplit(newurl)
+            ok = new.scheme in ("http", "https") and bool(new.hostname) and "@" not in new.netloc
+            ok = ok and not (old.scheme == "https" and new.scheme == "http")
+            ok = ok and (local_host(old.hostname) or not local_host(new.hostname))
+        except ValueError:
+            ok = False
+        if not ok:
+            raise urllib.error.URLError("the server redirected to an address that is not allowed")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def speed_opener():
+    """http and https only (urllib's default opener would also open file: and ftp: addresses), through the system proxy if there is one."""
+    op = urllib.request.OpenerDirector()
+    for h in (urllib.request.ProxyHandler(), urllib.request.UnknownHandler(), urllib.request.HTTPHandler(), urllib.request.HTTPSHandler(),
+              SafeRedirect(), urllib.request.HTTPDefaultErrorHandler(), urllib.request.HTTPErrorProcessor()):
+        op.add_handler(h)
+    return op
+
+
+def speed_error(exc, host=None):
+    """(kind, short reason without the address) for a failed test. kind: dns, timeout, http, tls, connect or other."""
+    if isinstance(exc, urllib.error.HTTPError):
+        try:
+            host = urlsplit(exc.url or "").hostname or host
+        except ValueError:
+            pass
+        if 300 <= exc.code < 400:  # urllib refuses a redirect to a non-http address, or after 3 hops, with the redirect's own code
+            return "http", "HTTP %s: the server redirected to an address that cannot be used (at most 3 redirects, to http or https only)" % exc.code
+        text = "HTTP %s %s from %s" % (exc.code, snippet(exc.reason if isinstance(exc.reason, str) else "", 40), host or "the server")
+        if 400 <= exc.code < 500:
+            text += "; the server refused the download, try a different address in the Internet download speed card"
+        return "http", " ".join(text.split())
+    cause = exc.reason if isinstance(exc, urllib.error.URLError) else exc
+    if isinstance(cause, socket.gaierror):
+        return "dns", "could not look up %s (no DNS answer)" % (host or "the server")
+    if isinstance(cause, ssl.SSLError):
+        text = "%s (TLS error)" % snippet(str(cause))
+        if IS_MAC:
+            text += "; python.org Python on macOS needs its certificates installed: run 'Install Certificates.command' from the Python folder in Applications"
+        return "tls", text
+    if isinstance(cause, (socket.timeout, TimeoutError)):
+        return "timeout", "timed out waiting for %s" % (host or "the server")
+    if isinstance(cause, OSError):
+        return "connect", "could not connect to %s: %s" % (host or "the server", snippet(str(cause), 80))
+    if isinstance(cause, str):
+        return "other", snippet(cause)
+    return "other", snippet("%s: %s" % (type(cause).__name__, cause))
+
+
+def do_speedtest(url, mb, trigger, wifi=None):
+    """One single-stream download of `mb` MB, measured after the first chunk arrived (so connect, TLS and the request are not counted).
+    Synchronous; returns the speed log record. A failure is ok:false with a reason, never a speed of 0."""
+    n = int(mb) * 1000000
+    started = dt.datetime.now()
+    stamp = started.strftime("%Y-%m-%d %H:%M:%S")
+    host = speed_host(url)
+    custom = bool(url) and url != logstore.SPEED_DEFAULT_URL
+    res = {"v": 1, "start": stamp, "trigger": trigger, "ok": False, "mbps": None, "ttfb_ms": None, "bytes": 0, "dur_s": None,
+           "total_s": None, "status": None, "host": host, "mb": int(mb), "range": custom, "capped": False, "kind": None, "reason": None,
+           "wifi": wifi}
+    state = {"running": True, "phase": "connecting", "pid": os.getpid(), "id": stamp, "trigger": trigger, "host": host, "mb": int(mb),
+             "target_bytes": n, "bytes": 0, "elapsed_s": 0.0, "mbps": None, "avg_mbps": None, "ttfb_ms": None, "next_at": None}
+    t0, wall0 = time.monotonic(), time.time()
+    total = first_len = 0
+    t_first = t_end = None
+    write_lock, last = threading.Lock(), {}
+
+    def report(now, rate=None, avg=None):
+        with write_lock:
+            last.clear()
+            last.update(state, bytes=total, elapsed_s=round(now - t0, 2), mbps=rate, avg_mbps=avg)
+            logstore.write_speed_progress({**last, "updated": time.time()})
+
+    stop_beat = threading.Event()
+
+    def heartbeat():
+        """The dashboard calls a running test stale when its file is not refreshed for 5 s, so keep it fresh while nothing arrives."""
+        while not stop_beat.wait(SPEED_HEARTBEAT_S):
+            with write_lock:
+                if last:
+                    logstore.write_speed_progress({**last, "elapsed_s": round(time.monotonic() - t0, 2), "updated": time.time()})
+
+    def slept():
+        return (time.time() - wall0) - (time.monotonic() - t0) > 10  # the wall clock ran on while the monotonic one stood still
+
+    beat = threading.Thread(target=heartbeat, daemon=True)
+    try:
+        report(t0)
+        beat.start()
+        req = speed_request(url, mb)
+        with speed_opener().open(req, timeout=SPEED_CONNECT_TIMEOUT) as resp:
+            res["status"] = getattr(resp, "status", None)
+            first = resp.read1(min(SPEED_CHUNK, n))  # whatever arrives first, so the time to first byte is real
+            t_first = t_end = time.monotonic()
+            total = first_len = len(first)
+            res["ttfb_ms"] = round((t_first - t0) * 1000, 1)
+            state.update(phase="downloading", ttfb_ms=res["ttfb_ms"])
+            window, last_report, eof = deque([(t_first, total)]), t_first, not first
+            while total < n and not eof:
+                if time.monotonic() - t0 > SPEED_CAP_S:  # checked before every receive, so a slow trickle stops near the cap
+                    res["capped"] = True
+                    t_end = time.monotonic()  # a stall at the end counts against the speed
+                    break
+                chunk = resp.read1(min(SPEED_CHUNK, n - total))
+                if not chunk:
+                    eof = True
+                    break
+                total += len(chunk)
+                t_end = time.monotonic()
+                window.append((t_end, total))
+                if t_end - last_report >= SPEED_PROGRESS_S:
+                    last_report = t_end
+                    while len(window) > 2 and t_end - window[0][0] > 1.0:
+                        window.popleft()
+                    span = t_end - window[0][0]
+                    report(t_end, round((total - window[0][1]) * 8 / span / 1e6, 2) if span > 0 else None,
+                           round((total - first_len) * 8 / (t_end - t_first) / 1e6, 2) if t_end > t_first else None)
+        cut = eof and (getattr(resp, "length", None) or 0) > 0  # the server promised more than it sent
+        res["bytes"] = total
+        res["total_s"] = round(t_end - t0, 2)
+        dur = t_end - t_first
+        res["dur_s"] = round(dur, 2)
+        if slept():
+            res.update(kind="other", reason="interrupted (computer slept)")
+        elif res["capped"] and total == first_len:  # nothing but the first chunk in the whole time: a stall, not a speed
+            res.update(kind="timeout", reason="the download stalled: no data after the first chunk in %d s" % SPEED_CAP_S)
+        elif cut:
+            res.update(kind="connect", reason="the server closed the connection after %.1f MB, before the download was complete" % (total / 1e6))
+        elif eof and total < min(n, SPEED_MIN_BYTES):
+            res.update(kind="short", reason="download was too short to measure: only %.1f MB arrived before the server ended it; choose a larger file or MB" % (total / 1e6))
+        elif dur < SPEED_MIN_S:
+            res.update(kind="short", reason="download was too short to measure (%.1f MB in %.2f s); choose a larger file or MB" % (total / 1e6, dur))
+        else:
+            res.update(ok=True, mbps=round((total - first_len) * 8 / dur / 1e6, 2))
+    except Exception as e:  # any failure is reported as an ERR result, never as a speed
+        t_end = time.monotonic()
+        res["bytes"], res["total_s"], res["dur_s"] = total, round(t_end - t0, 2), None
+        if slept():
+            res.update(kind="other", reason="interrupted (computer slept)")
+        else:
+            res["kind"], res["reason"] = speed_error(e, host)
+    finally:
+        stop_beat.set()
+        if beat.is_alive():
+            beat.join(2)
+    return res
+
+
+def run_speedtest_thread(gate, tracker, url, mb, trigger, wifi, every=0):
+    """Runs one test to the end: events, the speed log line, the final progress file (which also says when the next scheduled test is
+    due, `every` seconds after this one). The caller already holds gate.try_begin_speed()."""
+    try:
+        if trigger == "manual":
+            log_event("Speed test started (manual, %s MB from %s)" % (mb, speed_host(url)))
+        res = do_speedtest(url, mb, trigger, wifi)
+        when = dt.datetime.now()  # stamped at completion so the line lands in the current day's file
+        stamp = when.strftime("%Y-%m-%d %H:%M:%S")
+        logstore.append("speed", "%s %s" % (stamp, json.dumps(res, separators=(",", ":"))), when)
+        if res["ok"]:
+            log_event("Speed test finished: %.1f Mbps (%.1f MB in %.1f s)" % (res["mbps"], res["bytes"] / 1e6, res["dur_s"]))
+        else:
+            log_event("Speed test failed: %s" % res["reason"])
+        next_at = (when + dt.timedelta(seconds=every)).strftime("%Y-%m-%d %H:%M:%S") if every else None
+        logstore.write_speed_progress({"running": False, "phase": "done" if res["ok"] else "error", "pid": os.getpid(), "id": res["start"],
+                                       "trigger": trigger, "host": res["host"], "mb": res["mb"], "target_bytes": res["mb"] * 1000000,
+                                       "bytes": res["bytes"], "elapsed_s": res["total_s"], "mbps": res["mbps"], "avg_mbps": res["mbps"],
+                                       "ttfb_ms": res["ttfb_ms"], "next_at": next_at, "updated": time.time(), "result": {**res, "t": stamp}}, tries=5)
+        event = tracker.update("speed test", None if res["ok"] else res["reason"])
+        if event:
+            log_event(event)
+    finally:
+        gate.end_speed()
+
+
+def wifi_brief(w):
+    """The link details stored with a speed test, from the latest sample; None when there is no Wi-Fi link to describe."""
+    if not w or "error" in w or not w.get("assoc"):
+        return None
+    try:
+        tx = int(float(w["tx"])) if w.get("tx") else None
+    except ValueError:
+        tx = None
+    return {"rssi": w["rssi"], "snr": w["rssi"] - w["noise"] if w.get("noise") is not None else None, "ch": w["ch"], "band": w["band"], "tx": tx}
+
+
 def effective(args):
     """The control file (set from the dashboard) overrides the command-line values. Returns (control, interval, scan_every)."""
     ctl = logstore.read_control()
@@ -351,12 +654,21 @@ def main():
     gw, gw_reason, gw_at, last_day, next_scan = None, None, 0.0, None, 0.0
     last_scan_every = args.scan_every
     tracker = ErrorTracker()
+    gate = Gate()
+    raw = effective(args)[0]
+    ctl, scan_every = {**logstore.CONTROL_DEFAULTS, **raw}, args.scan_every
+    # A "Run now" stamp already in the control file at start-up is old: never replayed. If that first read failed, the first good read is the baseline.
+    baseline = getattr(raw, "ok", True)
+    seen_run, last_speed_every = ctl["speed_run"] if baseline else None, ctl["speed_every"]
+    boot = time.time()
+    next_speed = boot + last_speed_every if last_speed_every else float("inf")  # no test at boot; a schedule counts from now
+    speed_pending, seen_speed_end, last_idle, latest_wifi, hold_done = None, None, None, None, False
     info = {"pid": os.getpid(), "started": dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S"), "system": system_info(),
-            "interval": args.interval, "scan_every": args.scan_every, "host": args.host, "gateway": None, "mac_helper": have_helper}
+            "interval": args.interval, "scan_every": args.scan_every, "host": args.host, "gateway": None, "mac_helper": have_helper, "speed": True}
     logstore.write_info(info)  # lets the dashboard show the real probe settings
     try:
         while True:
-            start = time.time()
+            start, mono = time.time(), time.monotonic()
             now = dt.datetime.now()
             if now.date() != last_day:
                 logstore.maintain(now.date())
@@ -370,9 +682,12 @@ def main():
             f_gw = pool.submit(ping, gw) if gw != ERR else None
             f_net = pool.submit(ping, args.host)
             wifi = get_wifi(have_helper)
+            latest_wifi = wifi
             gw_val, gw_err = f_gw.result() if f_gw else (ERR, gw_reason)
             net_val, net_err = f_net.result()
             line = "%s gateway_ms=%s internet_ms=%s%s" % (now.strftime("%Y-%m-%d %H:%M:%S"), ms(gw_val), ms(net_val), format_wifi(wifi))
+            if gate.speed_overlaps(mono):
+                line += " speed=1"  # a download test was running: these pings are not representative
             logstore.append("monitor", line, now)
             print(line, flush=True)
             for what, reason in (("router ping", gw_err), ("internet ping", net_err),
@@ -381,14 +696,49 @@ def main():
                 if event:
                     logstore.append("monitor", "%s EVENT %s" % (now.strftime("%Y-%m-%d %H:%M:%S"), event), now)
                     print(event, flush=True)
-            ctl, _, scan_every = effective(args)
+            raw, _, new_scan_every = effective(args)
+            fresh = getattr(raw, "ok", True)
+            if fresh:
+                ctl, scan_every = {**logstore.CONTROL_DEFAULTS, **raw}, new_scan_every
+            # else the file could not be read this time (busy, damaged): keep the last values rather than falling back to defaults
             if scan_every != last_scan_every:  # changed on the dashboard: wait a full new period before the next scan
                 last_scan_every, next_scan = scan_every, start + scan_every
             if ctl["scan_paused"]:
                 next_scan = start + scan_every  # on resume, wait a full interval before scanning
-            elif scan_every and start >= next_scan:
-                threading.Thread(target=do_scan, args=(have_helper,), daemon=True).start()
+            elif scan_every and start >= next_scan and gate.try_begin_scan():  # blocked by a speed test: try again next sample
+                threading.Thread(target=run_scan, args=(gate, have_helper), daemon=True).start()
                 next_scan = start + scan_every
+
+            speed_every = ctl["speed_every"]
+            if gate.speed_end != seen_speed_end:  # a test finished: the next scheduled one is a full period after it
+                seen_speed_end = gate.speed_end
+                next_speed = time.time() - (time.monotonic() - seen_speed_end) + speed_every if speed_every else float("inf")
+                hold_done = True  # the test left its result in speed.json: leave it there until something else needs the file
+            if speed_every != last_speed_every:
+                last_speed_every, next_speed, hold_done = speed_every, start + speed_every if speed_every else float("inf"), False
+            if not speed_every and speed_pending == "scheduled":
+                speed_pending = None  # the schedule was switched off while the test was waiting for a scan to end
+            if fresh:
+                run = ctl["speed_run"]
+                if not baseline:
+                    seen_run, baseline = run, True
+                elif run is not None and (seen_run is None or run > seen_run):  # "Run now" on the dashboard
+                    seen_run = run
+                    if gate.speeding:
+                        log_event("Speed test already running, request ignored")
+                    else:
+                        speed_pending = "manual"
+            if speed_pending is None and speed_every and start >= next_speed:
+                speed_pending = "scheduled"
+            if speed_pending and gate.try_begin_speed():  # refused while a scan runs or just ended: stays pending, tried again next sample
+                url, mb = ctl["speed_url"] or logstore.SPEED_DEFAULT_URL, ctl["speed_mb"]
+                threading.Thread(target=run_speedtest_thread, args=(gate, tracker, url, mb, speed_pending, wifi_brief(latest_wifi), speed_every), daemon=True).start()
+                speed_pending, next_speed, hold_done = None, float("inf"), False
+            if not gate.speeding and not hold_done:
+                idle = {"running": False, "phase": "idle",
+                        "next_at": dt.datetime.fromtimestamp(next_speed).strftime("%Y-%m-%d %H:%M:%S") if next_speed != float("inf") else None}
+                if idle != last_idle and logstore.write_speed_progress({**idle, "updated": time.time()}):  # a failed write is retried next sample
+                    last_idle = idle
             pause(start, args)
     except KeyboardInterrupt:
         print("stopped")

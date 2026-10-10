@@ -284,6 +284,371 @@ class RefreshAndProbesTests(unittest.TestCase):
                                "2s", "1 min", "&lt;b a=&quot;1&quot;&gt;&amp;"])
 
 
+def mk_speed(mbps, ok=True, **kw):
+    """One entry of the "tests" list of /api/speed."""
+    t = {"v": 1, "start": "2026-10-09 12:00:00", "t": "2026-10-09 12:00:06", "trigger": "manual", "ok": ok, "mbps": mbps if ok else None, "ttfb_ms": 80.0 if ok else None,
+         "bytes": 25_000_000 if ok else None, "dur_s": 5.0, "status": 200 if ok else None, "host": "speed.cloudflare.com", "mb": 25, "capped": False,
+         "kind": None if ok else "dns", "reason": None if ok else "could not resolve", "wifi": {"rssi": -50, "snr": 38, "ch": 149, "band": "5", "tx": 866}}
+    t.update(kw)
+    return t
+
+
+@unittest.skipUnless(NODE, "Node.js is not installed")
+class SpeedHelperTests(unittest.TestCase):
+    def call(self, name, *args):
+        return helpers([[name, list(args)]])[0]
+
+    def test_scale_picks_the_smallest_that_fits(self):
+        cases = [(None, 100), (0, 100), (45.7, 100), (100, 100), (100.1, 250), (250, 250), (251, 500), (500, 500), (501, 1000), (940, 1000), (5000, 1000)]
+        self.assertEqual(helpers([["speedScale", [v]] for v, _ in cases]), [want for _, want in cases])
+
+    def test_needle_angle_is_clamped_to_the_dial(self):
+        out = helpers([["needleAngle", [v, sc]] for v, sc in [(None, 100), (-5, 100), (0, 100), (50, 100), (100, 100), (400, 100), (125, 250)]])
+        self.assertEqual(out, [0, 0, 0, 90, 180, 180, 90])
+
+    def test_mbps_text(self):
+        out = helpers([["fmtMbps", [v]] for v in (None, 312.4, 100, 99.94, 45.7, 5, 0)])
+        self.assertEqual(out, ["–", "312 Mbps", "100 Mbps", "99.9 Mbps", "45.7 Mbps", "5.0 Mbps", "0.0 Mbps"])
+
+    def test_median_ignores_failed_tests(self):
+        tests = [mk_speed(100), mk_speed(0, ok=False), mk_speed(300), mk_speed(200)]
+        self.assertEqual(self.call("speedMedian", tests), 200)
+        self.assertEqual(self.call("speedMedian", [tests[0], tests[2]]), 200)  # even count: mean of the middle two
+        self.assertIsNone(self.call("speedMedian", [mk_speed(0, ok=False)]))
+        self.assertIsNone(self.call("speedMedian", []))
+
+    def test_ok_needs_a_real_number(self):
+        out = helpers([["speedOk", [t]] for t in (mk_speed(10), mk_speed(0, ok=False), mk_speed(None), {"ok": True, "mbps": None}, None)])
+        self.assertEqual(out, [True, False, False, False, False])
+
+    def test_bar_colours_follow_the_median(self):
+        out = helpers([["speedBarColor", [v, 100]] for v in (100, 80, 79.9, 50, 49.9, 0)] + [["speedBarColor", [None, 100]], ["speedBarColor", [30, None]]])
+        self.assertEqual(out, ["good", "good", "warn", "warn", "bad", "bad", "muted", "good"])
+
+    def test_usage_estimate_and_metered_warning(self):
+        one, hourly, half, tenmin = (self.call("speedUsage", *a) for a in ((25, 0), (25, 3600), (25, 1800), (25, 600)))
+        self.assertEqual((one["perDayMB"], one["perMonthGB"], one["warn"]), (0, 0, False))
+        self.assertIn("25 MB", one["text"])
+        self.assertIn("only when you press Run now", one["text"])
+        self.assertNotIn("per day", one["text"])  # one-time mode: no "about 0 MB per day"
+        self.assertEqual((hourly["perDayMB"], hourly["warn"]), (600, False))
+        self.assertAlmostEqual(hourly["perMonthGB"], 18)
+        self.assertEqual((half["perDayMB"], half["warn"]), (1200, True))
+        self.assertAlmostEqual(tenmin["perDayMB"], 3600)
+        self.assertAlmostEqual(tenmin["perMonthGB"], 108)
+        self.assertIn("108 GB", tenmin["text"])
+        for u in (one, hourly):
+            self.assertNotIn("metered", u["text"])
+        for u in (half, tenmin):
+            self.assertIn("metered", u["text"])
+
+    def test_stats_leave_failed_tests_out_of_the_numbers(self):
+        st = self.call("speedStats", [mk_speed(100), mk_speed(0, ok=False), mk_speed(300)])
+        self.assertEqual((st["n"], st["okN"], st["last"], st["median"], st["min"], st["max"], st["avg"]), (3, 2, 300, 200, 100, 300, 200))
+        self.assertAlmostEqual(st["cv"], 0.5)
+        empty = self.call("speedStats", [])
+        self.assertEqual((empty["n"], empty["okN"], empty["last"], empty["median"], empty["cv"]), (0, 0, None, None, None))
+        only_err = self.call("speedStats", [mk_speed(0, ok=False)])
+        self.assertEqual((only_err["n"], only_err["okN"], only_err["last"], only_err["min"]), (1, 0, None, None))
+
+
+@unittest.skipUnless(NODE, "Node.js is not installed")
+class SpeedAdviceTests(unittest.TestCase):
+    def advice(self, tests, *link):
+        return helpers([["speedAdvice", [tests, *link]]])[0]
+
+    def keys(self, tests, *link):
+        return self.advice(tests, *link)["keys"]
+
+    def test_no_data_gives_no_advice(self):
+        self.assertEqual(self.advice([]), {"keys": [], "messages": []})
+
+    def test_healthy_result_says_ok_and_always_adds_the_caveat(self):
+        a = self.advice([mk_speed(400)])
+        self.assertEqual(a["keys"], ["ok"])
+        self.assertEqual(len(a["messages"]), 2)
+        self.assertIn("single download", a["messages"][-1])
+        self.assertIn("single download", self.advice([mk_speed(20, wifi={"rssi": -80, "snr": 10, "tx": 100})])["messages"][-1])
+
+    def test_weak_wifi(self):
+        for wifi in ({"rssi": -50, "snr": 20, "tx": 866}, {"rssi": -72, "snr": 38, "tx": 866}, {"rssi": -75, "snr": None, "tx": None}):
+            with self.subTest(wifi):
+                self.assertEqual(self.keys([mk_speed(30, wifi=wifi)]), ["wifi_weak"])
+
+    def test_far_below_the_negotiated_link_with_a_good_link(self):
+        self.assertEqual(self.keys([mk_speed(100)]), ["below_link"])   # 100 < 0.35 * 866
+        self.assertEqual(self.keys([mk_speed(303)]), ["below_link"])   # 0.35 * 866 = 303.1
+        self.assertEqual(self.keys([mk_speed(304)]), ["ok"])
+        # Windows has no snr: the rssi alone decides
+        self.assertEqual(self.keys([mk_speed(80, wifi={"rssi": -55, "snr": None, "tx": 300})]), ["below_link"])
+        # a link that is not good (rssi -68) is not blamed on the internet
+        self.assertEqual(self.keys([mk_speed(80, wifi={"rssi": -68, "snr": 30, "tx": 866})]), ["ok"])
+
+    def test_good_link_but_slow_when_tx_is_unknown(self):
+        self.assertEqual(self.keys([mk_speed(30, wifi={"rssi": -50, "snr": 40, "tx": None})]), ["good_link_slow"])
+        self.assertEqual(self.keys([mk_speed(60, wifi={"rssi": -50, "snr": 40, "tx": None})]), ["ok"])
+
+    def test_missing_wifi_block_is_not_an_error(self):
+        self.assertEqual(self.keys([mk_speed(30, wifi=None)]), ["ok"])
+        self.assertEqual(self.keys([mk_speed(30)], None), ["ok"])  # link given as null
+
+    def test_link_argument_overrides_the_test_block(self):
+        self.assertEqual(self.keys([mk_speed(400)], {"rssi": -80, "snr": 10, "tx": 100}), ["wifi_weak"])
+
+    def test_variance_needs_five_good_tests(self):
+        spread = [mk_speed(v) for v in (300, 100, 300, 120, 300)]
+        self.assertIn("variance", self.keys(spread))
+        self.assertNotIn("variance", self.keys(spread[:4]))
+        steady = [mk_speed(v) for v in (300, 310, 290, 305, 295)]
+        self.assertNotIn("variance", self.keys(steady))
+        # a failed test is not a zero: it does not make the series look unsteady
+        self.assertNotIn("variance", self.keys(steady + [mk_speed(0, ok=False)]))
+
+    def test_high_first_byte_time(self):
+        self.assertIn("ttfb_high", self.keys([mk_speed(400, ttfb_ms=501)]))
+        self.assertNotIn("ttfb_high", self.keys([mk_speed(400, ttfb_ms=500)]))
+
+    def test_slow_first_byte_is_not_reported_on_a_very_slow_link(self):
+        self.assertNotIn("ttfb_high", self.keys([mk_speed(4.9, ttfb_ms=900)]))
+        self.assertIn("ttfb_high", self.keys([mk_speed(5, ttfb_ms=900)]))
+
+    def test_failures(self):
+        bad = mk_speed(0, ok=False)
+        self.assertEqual(self.keys([mk_speed(400), bad, bad, bad]), ["all_failed"])
+        self.assertEqual(self.keys([mk_speed(400), bad, bad, mk_speed(400)]), ["ok"])
+        self.assertEqual(self.keys([bad]), ["all_failed"])  # nothing has ever worked
+
+
+@unittest.skipUnless(NODE, "Node.js is not installed")
+class SpeedSamplesAreNotCountedTests(unittest.TestCase):
+    """Samples taken during a speed test (speed: true) are drawn, but never count as loss, outages, spikes or unavailability."""
+
+    def noisy(self):
+        rows = [row(i) for i in range(60)]
+        for i in range(20, 30):  # a speed test fills the link: slow and lost pings
+            rows[i] = row(i, gw=250.0, net=None, netLost=True, speed=True)
+        rows[25] = row(25, gw=None, net=None, gwLost=True, netLost=True, speed=True)
+        return rows
+
+    def test_no_outage_spike_or_unavailability_from_a_test(self):
+        out = analyse(self.noisy())
+        st = out["stats"]
+        self.assertEqual((st["outages"], st["longest"], st["longestDown"]), (0, 0, 0))
+        self.assertEqual((st["avail"], st["availGw"], st["availNet"]), (100, 100, 100))
+        self.assertEqual(out["spikes"], [])
+        self.assertEqual(out["markers"], [])
+        self.assertEqual(out["events"], [])
+
+    def test_a_test_leaves_no_gap_and_jitter_ignores_it(self):
+        rows = self.noisy()
+        for i in range(20, 30):
+            rows[i]["net"] = 400.0 + i
+            rows[i]["netLost"] = False
+        out = analyse(rows)
+        self.assertEqual(out["markers"], [])
+        self.assertEqual(out["stats"]["jitter"], 0)
+        self.assertEqual(out["stats"]["call"], 100)
+
+    def test_a_real_outage_around_a_test_is_still_found(self):
+        rows = [row(i) for i in range(60)]
+        for i in (10, 11, 12):
+            rows[i] = row(i, gw=None, net=None, gwLost=True, netLost=True)
+        for i in range(30, 40):
+            rows[i] = row(i, net=500.0, speed=True)
+        out = analyse(rows)
+        self.assertEqual(out["stats"]["outages"], 1)
+        self.assertEqual([e["label"] for e in out["events"]], ["OUTAGE"])
+        self.assertEqual(len(out["spikes"]), 1)  # the lost pings at 10 to 12, not the test
+
+    def test_an_outage_that_spans_a_test_is_not_cut_in_two(self):
+        rows = [row(i) for i in range(40)]
+        for i in range(5, 35):
+            rows[i] = row(i, gw=None, net=None, gwLost=True, netLost=True, speed=15 <= i < 20)
+        out = analyse(rows)
+        self.assertEqual(out["stats"]["outages"], 1)
+
+    def test_data_without_the_flag_is_unchanged(self):
+        rows = [row(i) for i in range(30)]
+        rows[5] = lost(5, "net")
+        self.assertEqual(analyse(rows)["stats"], analyse([dict(r, speed=False) for r in rows])["stats"])
+
+
+@unittest.skipUnless(NODE, "Node.js is not installed")
+class SpeedSamplesInTilesAndSelectionTests(unittest.TestCase):
+    """latencyFigures feeds the tiles (render) and the selection panel (renderSel): speed-test samples must not reach either."""
+
+    def rows(self):
+        rows = [row(i, gw=3.0 + i % 2, net=20.0) for i in range(10)]
+        rows[2] = lost(2, "net")
+        rows[3] = err(3, "gw")
+        for i in (5, 6, 7):  # during a test: slow, lost and unmeasured pings
+            rows[i] = row(i, gw=300.0, net=None, netLost=True, speed=True)
+        rows[6] = row(6, gw=None, net=None, gwLost=True, netLost=True, speed=True)
+        rows[7] = row(7, gw=None, net=None, gwErr=True, netErr=True, speed=True)
+        return rows
+
+    def test_speed_samples_are_left_out_of_every_figure(self):
+        f = helpers([["latencyFigures", [self.rows()]]])[0]
+        self.assertEqual(len(f["core"]), 7)
+        self.assertEqual(f["gw"], [3.0, 4.0, 3.0, 3.0, 3.0, 4.0])  # the 300 ms pings are gone
+        self.assertEqual(f["net"], [20.0] * 6)
+        self.assertEqual((f["gwLost"], f["netLost"]), (0, 1))
+        self.assertEqual((f["gwN"], f["netN"], f["errN"]), (6, 7, 1))
+
+    def test_data_without_speed_samples_is_counted_in_full(self):
+        rows = [row(i) for i in range(5)]
+        rows[1] = lost(1, "gw net")
+        f = helpers([["latencyFigures", [rows]]])[0]
+        self.assertEqual((len(f["core"]), len(f["gw"]), len(f["net"]), f["gwLost"], f["netLost"], f["gwN"], f["netN"], f["errN"]), (5, 4, 4, 1, 1, 5, 5, 0))
+
+    def test_tiles_and_selection_panel_use_the_helper(self):
+        with open(HTML, encoding="utf-8") as f:
+            script = re.search(r"<script>(.*)</script>", f.read(), re.S).group(1)
+        render = re.search(r"\nfunction render\(\) \{.*?\n\}\n", script, re.S).group(0)
+        sel = re.search(r"\nfunction renderSel\(\) \{.*?\n\}\n", script, re.S).group(0)
+        self.assertIn("= latencyFigures(rows);", render)
+        self.assertIn("= latencyFigures(rs);", sel)
+        # no figure is taken straight from the unfiltered rows any more
+        self.assertNotRegex(render, r"\b(gwOk|netOk|gwN|netN|errN|gwLost|netLost)\s*=\s*rows\.filter")
+        self.assertNotRegex(sel, r"rs\.filter\(d => d\.(gw|net)")
+        self.assertNotRegex(sel, r"rs\.length\) \* ?100|rs\.length\)\.toFixed")
+
+
+@unittest.skipUnless(NODE, "Node.js is not installed")
+class SpeedMeasurementEventsTests(unittest.TestCase):
+    """"Measurement error: speed test ..." events are about the speed test, not about the ping or Wi-Fi measurements."""
+    SPEED_ERR = "Measurement error: speed test could not be measured (could not resolve). Not counted as packet loss or a disconnect."
+    PING_ERR = "Measurement error: Wi-Fi status could not be measured (x). Not counted as packet loss or a disconnect."
+
+    def test_which_events_are_speed_events(self):
+        texts = [self.SPEED_ERR, "Measurement recovered: speed test is being measured again", self.PING_ERR, "Measurement recovered: router ping is being measured again",
+                 "Measurement error: speed testing x", "Speed test failed: could not resolve"]
+        out = helpers([["isSpeedMeasure", [{"text": t}]] for t in texts])
+        self.assertEqual(out, [True, True, False, False, False, False])
+
+    def test_speed_error_is_not_counted_as_a_ping_error(self):
+        rows = [row(i) for i in range(10)]
+        out = analyse(rows, merrs=[{"x": T0 + 15000, "t": "", "text": self.SPEED_ERR}])
+        self.assertEqual(out["stats"]["errors"], 0)
+        # it still shows up in the Events card and on the chart, with its own wording
+        self.assertEqual([m["type"] for m in out["markers"]], ["errors"])
+        self.assertIn("speed test", out["events"][0]["text"])
+        both = analyse(rows, merrs=[{"x": T0 + 15000, "t": "", "text": self.SPEED_ERR}, {"x": T0 + 20000, "t": "", "text": self.PING_ERR}])
+        self.assertEqual(both["stats"]["errors"], 1)
+
+    def test_banner_reason_skips_speed_events(self):
+        with open(HTML, encoding="utf-8") as f:
+            script = re.search(r"<script>(.*)</script>", f.read(), re.S).group(1)
+        why = re.search(r"const why = (.*);", script).group(1)
+        self.assertIn("!isSpeedMeasure(n)", why)
+
+
+class SpeedCardMarkupTests(unittest.TestCase):
+    """Static checks of the Internet download speed card (no Node needed)."""
+
+    @classmethod
+    def setUpClass(cls):
+        with open(HTML, encoding="utf-8") as f:
+            cls.html = f.read()
+        with open(README, encoding="utf-8") as f:
+            cls.readme = f.read()
+        cls.dom = Markup(cls.html)
+        cls.script = re.search(r"<script>(.*)</script>", cls.html, re.S).group(1)
+
+    def one(self, ident):
+        found = self.dom.by_id(ident)
+        self.assertEqual(len(found), 1, "id %s must exist exactly once" % ident)
+        return found[0]
+
+    def test_ids_exist_exactly_once_inside_the_card(self):
+        for ident in ("spUrl", "spMb", "spEvery", "spRun", "spSave", "spUsage", "spGauge", "cSpeed", "spBody", "spAdvice"):
+            with self.subTest(ident):
+                self.assertIn(("div", "speedCard"), self.one(ident)["up"])
+        self.assertEqual(self.one("speedCard")["attrs"].get("class", "").split(), ["card", "full"])
+
+    def test_card_comes_right_after_the_least_crowded_channels_card(self):
+        i_blocks, i_speed, i_tx = (self.html.index(n) for n in ('id="cBlocks"', 'id="speedCard"', '<div class="card"><h2>Transmit rate'))
+        self.assertLess(i_blocks, i_speed)
+        self.assertLess(i_speed, i_tx)
+        # the only card opened between the chart and the end of the speed card's opening tag is the speed card itself
+        self.assertEqual(self.html[i_blocks:i_speed].count('<div class="card'), 1)
+        self.assertEqual(self.html[i_speed:i_tx].count('<div class="card'), 0)
+
+    def test_title_hint_and_label(self):
+        h2 = re.search(r'<div class="card full" id="speedCard"><h2>(.*?)</h2>', self.html, re.S).group(1)
+        self.assertTrue(h2.startswith("Internet download speed"))
+        self.assertIn('data-tip-key="speed"', h2)
+        self.assertIn("Single download from one server. Not a full speed test: it can read lower than your plan on fast connections.", self.html)
+
+    def test_form_controls(self):
+        url = self.one("spUrl")["attrs"]
+        self.assertEqual((url["type"], url["maxlength"]), ("url", "500"))
+        self.assertEqual(url["placeholder"], "Default: Cloudflare (speed.cloudflare.com)")
+        mb = self.one("spMb")["attrs"]
+        self.assertEqual((mb["type"], mb["min"], mb["max"]), ("number", "10", "100"))
+        sel = re.search(r'<select[^>]*id="spEvery".*?</select>', self.html, re.S).group(0)
+        self.assertEqual(re.findall(r'<option value="(\d+)">([^<]*)<', sel), [("0", "One time"), ("600", "Every 10 min"), ("1800", "Every 30 min"), ("3600", "Every 1 hour")])
+        self.assertNotIn("start-up", sel)
+        self.assertNotIn("data-ctl", self.one("spEvery")["attrs"])  # not the probes table's menu mechanism
+        self.assertEqual(self.one("spRun")["text"], "Run now")
+        self.assertEqual(self.one("spSave")["text"], "Save")
+        self.assertEqual(self.one("spGauge")["tag"], "svg")
+        self.assertEqual(self.one("cSpeed")["tag"], "canvas")
+
+    def test_tip_fix_and_export_entries(self):
+        for needle in ('  speed: "', "FIX.speed = {", "speed: 'speed'", "speed: 'download-speed'", "  speed: r => ({"):
+            with self.subTest(needle):
+                self.assertIn(needle, self.script)
+        fix = re.search(r"FIX\.speed = \{(.*?)\};", self.script, re.S).group(1)
+        for part in ("you:", "router:", "isp:"):
+            self.assertIn(part, fix)
+        # the existing wiring turns the hint into the export button and the "How to improve" block
+        self.assertIn("EXPORTS[key] && card", self.script)
+        self.assertIn("FIX[key] && card", self.script)
+
+    def test_probes_tip_names_the_one_exception(self):
+        self.assertIn("about 100 bytes each. The one exception is the Internet download speed test, which downloads 10 to 100 MB from a speed server, "
+                      "only when you press Run now or choose a schedule in its own card.", self.script)
+
+    def test_behaviour_is_wired(self):
+        for needle in ("fetch('/api/speed'", "speed_run: true", "body.speed_url", "speed_mb:", "speed_every:", "id: 'speedTests'", "globalAlpha = 0.10",
+                       "The collector is not running, so nothing will happen. Start it first", "setTimeout(loadSpeed, 1000)", "document.hidden", "d.speed", "speedPlugin]"):
+            with self.subTest(needle):
+                self.assertIn(needle, self.script)
+
+    def test_error_texts_and_masked_url_handling(self):
+        self.assertNotIn(".slice(0, 300)", self.script)  # the server's 400 text (about 310 characters) must not be cut
+        self.assertIn(".slice(0, 800)", self.script)
+        self.assertIn("r.status === 403", self.script)
+        self.assertIn("open the dashboard at http://127.0.0.1:", self.script)
+        # speed_url is only sent when the user typed in the field, so a masked value is never written back
+        self.assertIn("if (speedUrlEdited) body.speed_url", self.script)
+        self.assertNotIn("speed_url: url", self.script)
+        self.assertIn("this page was not opened from this computer", self.script)
+
+    def test_stale_state_does_not_claim_the_collector_stopped_while_it_runs(self):
+        text = re.search(r"else if \(noColl\) text = (.*)\n\s*else if \(st\.phase === 'stale'\) text = '([^']*)'", self.script)
+        self.assertTrue(text)
+        self.assertNotIn("collector", text.group(2))
+        self.assertIn("collector is not running", text.group(1))
+
+    def test_server_text_is_escaped_before_it_goes_into_html(self):
+        fn = re.search(r"function renderSpeed\(\) \{.*?\n\}\n", self.script, re.S).group(0)
+        uses = [m.start() for m in re.finditer(r"t\.reason", fn)]
+        self.assertTrue(uses)
+        for i in uses:
+            self.assertTrue(fn[:i].endswith("escHtml("), fn[max(0, i - 30):i + 20])
+        self.assertNotRegex(self.script, r"innerHTML[^\n]*s\.url")
+
+    def test_readme_describes_the_feature(self):
+        for needle in ("Internet download speed", "wifi-speed-", "speed.json", "speed_url", "speed_mb", "speed_every", "speed_run", "metered", "single stream",
+                       "Install Certificates.command"):
+            with self.subTest(needle):
+                self.assertIn(needle, self.readme)
+        self.assertNotIn("no internet service is involved", self.readme)
+        self.assertNotIn("only thing the dashboard page fetches from outside", self.readme)
+
+
 SUMMARY_NOW = {"id": "router", "every": 5, "everyText": "5 s"}
 
 

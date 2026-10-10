@@ -2,7 +2,7 @@
 
 Find out why your Wi-Fi drops during Zoom and Teams calls. WiFiMonitor records router and internet latency, signal quality, channel and band, and how crowded your channel is, then shows it all on a live dashboard so you can line up bad moments with their cause.
 
-Runs on **macOS** and **Windows**. Everything stays on your machine. It is a standalone tool: no AI service, account, API key or internet service is involved. The collector and dashboard server use only the Python standard library, and the only thing the dashboard page fetches from outside your computer is the Chart.js charting library from a CDN.
+Runs on **macOS** and **Windows**. Everything stays on your machine. It is a standalone tool: no AI service, account or API key is involved, and the collector and dashboard server use only the Python standard library. Beyond the pings to your router and the internet target (about 100 bytes each), the dashboard page loads the Chart.js charting library from a CDN, and the optional **Internet download speed** test downloads 10 to 100 MB from a speed server, but only when you press Run now or choose a schedule for it. Nothing else leaves your computer.
 
 ## What it measures
 
@@ -13,6 +13,7 @@ Runs on **macOS** and **Windows**. Everything stays on your machine. It is a sta
 | RSSI, noise, SNR | Weak signal or a noisy channel. SNR of 25 dB or more is comfortable for calls |
 | Channel, band, width, rate | Shows band hopping (5 GHz to 2.4 GHz) and rate drops |
 | Nearby-network scan | How many networks share your channel, and which channels are quietest |
+| Internet download speed (on request) | How fast data reaches this computer from one server, next to the Wi-Fi link at that moment, to tell a weak Wi-Fi link from a slow internet connection |
 
 ## Requirements
 
@@ -48,6 +49,7 @@ WiFiMonitor runs as a normal user. It needs no administrator rights, no `sudo`, 
 | Outbound ping (ICMP) to your router and to the internet target (default `1.1.1.1`) | Latency and packet-loss measurements |
 | Listening on `127.0.0.1:8765` | The dashboard. It is not reachable from other computers |
 | Browser access to `cdnjs.cloudflare.com` | Loading Chart.js for the charts |
+| Outbound HTTPS (or HTTP) download from the speed server, by default `speed.cloudflare.com` | Only for the Internet download speed test, and only when you run it or schedule it |
 
 **Background service (optional)**
 
@@ -59,6 +61,7 @@ The `service` commands also run as a normal user and need no administrator right
 - Because Location Services is not granted, macOS hides your network name and the access point's BSSID, so they are not logged. Granting Location Services to a command-line tool is not something macOS normally allows, and nothing here depends on it.
 - If macOS ever asks whether Terminal or Python may find devices on your local network, allow it, since the collector pings your router. This prompt did not appear on the test machine.
 - The first run compiles the helper with `swiftc` from the Xcode Command Line Tools. That is the only step that needs developer tools.
+- If your Python comes from python.org, it may not trust HTTPS certificates until you run `Install Certificates.command` (in `/Applications/Python 3.x/`). Until then the Internet download speed test fails with a certificate error and the dashboard says so. Python from Xcode Command Line Tools or Homebrew does not need this.
 
 **Windows**
 
@@ -188,7 +191,12 @@ Scans make the radio briefly leave its channel and can cause a slow or lost ping
 ## The dashboard
 
 - **Status and tiles:** current router and internet latency, packet loss, signal, SNR, channel, transmit rate and channel crowding, plus four summary tiles for the range you are looking at: **Events** (outages, channel or band changes and your notes), **Availability** (share of observed time connected and reachable, and the longest outage), **Jitter** (how much the internet ping varies from sample to sample) and **Call-ready** (share of samples good enough for a video call: router ping under 50 ms, internet ping under 150 ms, nothing lost, SNR at least 20 dB). The window buttons (15m, 1h, 3h, All), a selected day, or a zoomed range change what the tiles cover.
-- **Charts:** latency with lost pings marked, signal and noise, SNR, transmit rate, networks sharing your channel over time, networks per channel from the latest scan, and a ranking of the least crowded channels.
+- **Charts:** latency with lost pings marked, signal and noise, SNR, transmit rate, networks sharing your channel over time, networks per channel from the latest scan, a ranking of the least crowded channels, and the Internet download speed card described below.
+- **Internet download speed:** this card measures how fast data reaches this computer. Press **Run now** for one test, or pick a schedule (one time, every 10 min, 30 min or 1 hour) and press **Save**. You can also set the server address (empty means the default, Cloudflare at `speed.cloudflare.com`) and the size, 10 to 100 MB. A gauge shows the live speed during a test and the last result after it, a chart shows the recent tests (green close to your usual speed, orange below 80% and red below 50% of the median, with a dashed average line, and a failed test as ERR, never as 0), and a table lists the last 15 tests with the Wi-Fi signal, SNR and channel at the moment each one started. A short note under the table suggests what the results point to: a weak Wi-Fi link, a slow internet connection behind a healthy link, results that swing between tests, a slow first byte, or repeated failures. Each test also shades its time span green on the latency chart, and the pings taken during a test are drawn but left out of the packet loss, outage, jitter and slow-episode figures, because the test itself fills the link and slows them down. Daily summaries leave them out too.
+  - **Data use:** every test downloads the full size, so a schedule adds up: 25 MB every 10 minutes is about 3.6 GB per day, or 108 GB per month. The card shows this estimate while you edit the settings and warns at about 1 GB per day or more. Avoid frequent schedules on a metered or capped connection, such as a mobile hotspot or a data plan. The default is one time (only Run now) at 25 MB. A test stops after 60 seconds even if the download is not finished. A custom address must be an `http` or `https` address; with a custom address the test asks for the first bytes of the file, and it never follows a redirect to anything but `http` or `https`.
+  - **It is a single stream from one server, not a full speed test.** On a fast connection (for example 500 Mbps or more) one download from one server often reads lower than your plan, so compare with an Ethernet cable or another speed test before blaming your provider. Treat it as a way to see changes over time and to separate Wi-Fi from internet problems.
+  - **Failures:** a test that cannot finish (no internet, a wrong or blocked address, a certificate problem, a timeout, a download too short to measure, or the computer sleeping during the test) is logged as an error with the reason, shown as ERR, and counts as a measurement error after three in a row. It is not zero speed.
+  - Run now and the settings need the collector to be running (the card says so otherwise), and the settings only work when the page is opened from this computer (`127.0.0.1` or `localhost`). Opened from another address, the card shows only the host of a custom server, never the full address, and refuses changes. A "Measurement error: speed test" event in the Events card is about the speed test only: it does not trigger the red measurement banner and is not counted as a ping error.
 - **Help icons:** every tile, chart, header control and table column has a small (i) icon. Hover it, focus it with the keyboard, or tap it to see a short explanation of what it shows and what a good or bad value looks like.
 - **How to improve:** every tile and chart has a collapsible "How to improve" section. It lists what you can do yourself, what to change in your router's settings, and what may be locked by your ISP. Many ISP-supplied routers hide or lock the channel, width and band steering, so each section says to ask the ISP, or add your own router or access point, when an option is missing. An opened tile stretches to full width and stays open while the data refreshes.
 - **Latency chart markers and causes:** dots at the top of the latency chart mark your notes, channel or band changes and outages (shaded), with small ticks for scans. Hover a dot for details. Under the chart, each slow or lost-ping episode is listed with a likely cause (a disconnect, a channel change, a scan by this tool, weak signal, Wi-Fi congestion, or something beyond your router). The causes are a heuristic based on what changed at the same moment.
@@ -198,7 +206,7 @@ Scans make the radio briefly leave its channel and can cause a slow or lost ping
 - **Measurement errors:** if a ping or the Wi-Fi status cannot be measured (not the same as a lost ping), the tiles show `ERR`, the status says "Measurement error", a banner explains why while it lasts, and the Events card and latency chart mark the start and the recovery. These samples are not counted as packet loss, outages or unavailability, and the Packet loss tile says how many were not measured.
 - **Header:** the header controls are centered and wrap onto extra lines on narrow screens, each control staying together with its (i) icon.
 - **Refresh interval:** the "↻ every 5 s" menu in the header sets how often the page reloads its data from the local server: 2 s, 5 s, 10 s, 30 s, 1 min or paused. When paused, the footer offers "Refresh now". The choice is remembered in the browser. It only changes how often the page looks for new data. How often the collector measures is separate (`--interval`, see Configuration), so refreshing faster than the sample interval shows nothing new.
-- **Probes settings:** this card is collapsed by default. Open or close it with the arrow button or by clicking its title; while collapsed it shows a one-line summary of the current settings, and the browser remembers whether you left it open. The Every menus are inside it. Opened, it lists everything the collector does, with the target and the exact command, how often it runs, when it last ran, the last result, and how much network it uses. It shows the real settings, read from `logs/collector.json`, which the collector writes at start. If the collector is not running, the card says so. The table can be exported like the other cards.
+- **Probes settings:** this card is collapsed by default. Open or close it with the arrow button or by clicking its title; while collapsed it shows a one-line summary of the current settings, and the browser remembers whether you left it open. The Every menus are inside it. Opened, it lists everything the collector does, with the target and the exact command, how often it runs, when it last ran, the last result, and how much network it uses. It shows the real settings, read from `logs/collector.json`, which the collector writes at start. If the collector is not running, the card says so. The table can be exported like the other cards. It also lists the Internet download speed test, with its server, the data it uses per test and per day at the current setting, and its last result; it is set in its own card, not in this table.
 - **Changing probe intervals from the page:** the menus in the table's "Every" column retime the probes without restarting anything. The router, internet and Wi-Fi probes share one sampling loop, so one menu sets all three (2, 5, 10 or 15 s). Nearby-network scans can run every 5 min, 15 min, 30 min, 1 h or be turned off. A change applies within a few seconds, is noted in the Events card, and is remembered in `logs/control.json` until you change it again. "Start-up value" removes the override and returns to the `--interval` and `--scan-every` values the collector was started with. Samples slower than 15 s are not offered, because the charts treat a longer silence as missing data. The header's refresh menu is separate and only changes how often the page reloads.
 - **Stop button:** when the dashboard is served by the background service (see [Option 2](#option-2-background-service)), a **Stop** button with an (i) help icon appears in the header. It ends the collector and the dashboard. It does not appear when you started with `--terminal`.
 - **Scanning switch:** the "Scanning on" switch in the header pauses and resumes nearby-network scans without stopping the collector. Use it before an important call, because a scan briefly leaves your channel and can cost a lost ping. After you resume, the next scan waits a full interval. Each change is logged as a note, so pauses show up in the Events list. The setting is kept in `logs/control.json`, which the collector re-reads every sample.
@@ -219,10 +227,12 @@ logs/
   wifi-monitor-2026-10-09.log       samples and notes (today, plain text)
   wifi-monitor-2026-10-08.log.gz    previous days, compressed
   wifi-scan-2026-10-09.log          nearby-network scans
+  wifi-speed-2026-10-09.log         Internet download speed tests (one JSON line per finished test)
   service.log                       background service output (rotated, about 1.5 MB at most)
   service.pid                       process id of the running background service
   collector.json                    the collector's start-up settings, read by the dashboard's probes table
-  control.json                      settings changed from the dashboard (scan switch, probe intervals)
+  control.json                      settings changed from the dashboard (scan switch, probe intervals, speed_url, speed_mb, speed_every, speed_run)
+  speed.json                        progress of the running Internet download speed test, read by the dashboard
 ```
 
 - A new file starts at midnight.
@@ -247,6 +257,8 @@ One line per sample:
 
 Scan lines are a timestamp followed by JSON: `{"own":[36,"5","80"],"nets":[[channel,"band",rssi],...]}`.
 
+Speed test lines (`wifi-speed-*.log`) are the time the test finished followed by JSON, for example `{"v":1,"start":"2026-10-09 12:00:00","trigger":"manual","ok":true,"mbps":312.4,"ttfb_ms":84.2,"bytes":25000000,"dur_s":5.21,"status":200,"host":"speed.cloudflare.com","mb":25,"wifi":{"rssi":-52,"snr":38,"ch":149,"band":"5","tx":866}}` (a few more fields are kept). The speed is the data after the first chunk divided by the time it took, in megabits per second (1 MB is 1,000,000 bytes). A failed test has `"ok":false`, `"mbps":null`, a `kind` (dns, timeout, http, tls, connect, short or other) and a short `reason`. The address is never logged, only the host. A monitor line that was taken during or overlapping a test ends with `speed=1`: it is drawn on the charts but left out of the daily summary and the statistics. Scheduled tests add only a "Speed test finished" or "Speed test failed" note to the log, and a test started from the dashboard also adds "Speed test started".
+
 ## Project layout
 
 ```
@@ -268,7 +280,7 @@ logs/                     log files (ignored by git)
 bin/                      built macOS helper (ignored by git)
 ```
 
-The server only listens on `127.0.0.1`. It only accepts notes, the scanning switch and (in service mode) the Stop request when they are posted from its own page.
+The server only listens on `127.0.0.1`. It only accepts notes, the scanning switch, the probe intervals, the Internet download speed settings and requests, and (in service mode) the Stop request, when they are posted from its own page. The speed settings are also refused unless the page was opened as `127.0.0.1` or `localhost`.
 
 ## Limitations
 
@@ -277,6 +289,7 @@ The server only listens on `127.0.0.1`. It only accepts notes, the scanning swit
 - **Measurement errors are kept apart from real problems.** A command that fails, times out or prints something unreadable is logged as `ERR` and a measurement error event. It is left out of packet loss, outages, availability and the call-ready score, and the dashboard shows a banner, an "ERR" value on the tiles, a "Measurement error" status and an entry in the Events card.
 - **Missing fields are handled cleanly.** When the system does not report noise, SNR or channel width (Windows), the dashboard hides what has no data, shows "not reported here" on the tiles and adds a short note under the Signal and SNR charts. If no Wi-Fi details are logged at all, those notes say what to check, and the collector prints a one-time warning when `netsh` returns nothing. Ping-based tiles and charts keep working either way.
 - **Windows needs an English display language, and other languages are not supported yet.** The collector reads `netsh` labels such as "State" and "Signal", and other languages use different words. When it sees non-English output, it logs `wifi=ERR` and a measurement error event that names the language, prints a warning at start-up, and the dashboard shows a banner saying the language is not supported yet. Ping times are still read in most languages, and real packet loss is still recognised in any language. macOS does not depend on the system language. Windows 11 24H2 and newer may also need Location Services turned on for `netsh wlan` to return results.
+- **The speed test is one download from one server.** It cannot see your plan's real maximum on a fast connection, and the server, its distance and the time of day change the result. Use it to compare yourself against yourself. It uses real data (10 to 100 MB per test), so schedule it with care on a metered connection.
 - **Windows scans use Windows' cached scan results,** which can be a little stale. macOS scans are live.
 - **The Windows code is tested against sample `netsh` and `ping` output only,** not on a real Windows machine. The automated tests run on any system.
 - Linux is not supported.
@@ -286,6 +299,8 @@ The server only listens on `127.0.0.1`. It only accepts notes, the scanning swit
 - **"swiftc not found" on macOS:** run `xcode-select --install`, then start again. Until then only pings are logged.
 - **Dashboard says "No recent data":** the collector is not running, or the computer was asleep. Keep the machine awake while monitoring (`caffeinate` on macOS).
 - **Charts are blank:** check the browser can reach `cdnjs.cloudflare.com`.
+- **The speed test fails with a certificate error on macOS:** the Python you use does not trust HTTPS certificates yet. If it is from python.org, run `Install Certificates.command` from its folder in `/Applications`. A custom `http` address avoids HTTPS altogether.
+- **Run now is greyed out:** the collector is not running. Start the service (`./service.sh start`) or the collector, then try again. A test also cannot start at the same moment as a nearby-network scan, so it may wait a few seconds.
 - **Port already in use:** start with another port, for example `PORT=8800 python3 src/dashboard_server.py`. If `start.sh --terminal` says the background service is already running, stop it with `./service.sh stop` or just open the dashboard.
 - **Service port:** `PORT=8800 ./service.sh start` runs the service on that port. Use the same `PORT` for `status`, and note that the login start from `install` always uses the default 8765.
 - **Dashboard is not reachable after `service.sh start`:** it prints where to look. Read `logs/service.log`, which shows the output of both processes and any restarts.

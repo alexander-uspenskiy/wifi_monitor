@@ -18,8 +18,8 @@ function line(name) {                     // a one-line `const name = ...;` decl
   const m = script.match(new RegExp('^const ' + name + ' = .*$', 'm'));
   return m ? m[0] : '';
 }
-const wanted = ['buildMarkers', 'analyzeSpikes', 'qualityStats', 'events', 'probesSummary'].map(fn).join('\n');
-const consts = ['pT', 'fmtTS', 'fmtDur', 'pct', 'f1', 'fmtAvail', 'isMeasure', 'refreshLabel', 'fmtEvery', 'everyLabel', 'fmtAgo', 'escHtml'].map(line).join('\n');
+const wanted = ['buildMarkers', 'analyzeSpikes', 'qualityStats', 'events', 'probesSummary', 'speedScale', 'needleAngle', 'speedMedian', 'speedUsage', 'speedStats', 'speedAdvice', 'latencyFigures'].map(fn).join('\n');
+const consts = ['pT', 'fmtTS', 'fmtDur', 'pct', 'f1', 'fmtAvail', 'isMeasure', 'isSpeedMeasure', 'refreshLabel', 'fmtEvery', 'everyLabel', 'fmtAgo', 'escHtml', 'fmtMbps', 'speedOk', 'speedBarColor'].map(line).join('\n');
 const gaps = (script.match(/^const STALE_MS = .*$/m) || [''])[0];
 
 // Runs the page's own setProbesOpen against a minimal fake DOM and storage. scenario = {store, throws, steps: [[open, save], ...]}.
@@ -54,7 +54,7 @@ const body = `
     stats: qualityStats(input.rows, input.xmin, input.xmax),
     markers: buildMarkers(input.rows),
     events: events(input.rows),
-    calls: (input.calls || []).map(([name, args]) => ({ refreshLabel, fmtEvery, everyLabel, fmtAgo, escHtml, probesSummary })[name](...args)),
+    calls: (input.calls || []).map(([name, args]) => ({ refreshLabel, fmtEvery, everyLabel, fmtAgo, escHtml, probesSummary, speedScale, needleAngle, fmtMbps, speedMedian, speedBarColor, speedUsage, speedOk, speedStats, speedAdvice, latencyFigures, isMeasure, isSpeedMeasure })[name](...args)),
     spikes: analyzeSpikes(input.rows, buildMarkers(input.rows)).map(e => ({ cause: e.cause, group: e.group, lost: e.lost })),
   };`;
 const out = new Function('input', body)(input);
