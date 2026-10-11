@@ -179,6 +179,18 @@ class ErrHandlingTests(unittest.TestCase):
         st = analyse(rows)["stats"]
         self.assertEqual((st["call"], st["worst"]), (100, 0))
 
+    def test_call_ready_worst_stretch_does_not_span_a_sleep_gap(self):
+        bad = dict(gw=80.0)
+        rows = [row(i, **bad) for i in range(3)] + [row(120 + i, **bad) for i in range(3)]  # 10 minutes asleep between two short bad stretches
+        rows += [row(130 + i) for i in range(4)]
+        st = analyse(rows)["stats"]
+        self.assertEqual(st["worst"], 15000)
+        self.assertEqual(st["call"], 40)  # 4 good of 10 samples: the sleep adds no samples either way
+
+    def test_call_ready_bad_stretch_still_counts_without_a_gap(self):
+        st = analyse([row(i) for i in range(2)] + [row(2 + i, gw=80.0) for i in range(4)] + [row(6)])["stats"]
+        self.assertEqual(st["worst"], 20000)
+
     def test_measurement_events_become_markers_and_events_but_not_notes(self):
         rows = [row(i) for i in range(10)]
         merrs = [{"x": T0 + 15000, "t": "", "text": "Measurement error: Wi-Fi status could not be measured (x). Not counted as packet loss or a disconnect."},
@@ -341,6 +353,19 @@ class SpeedHelperTests(unittest.TestCase):
             self.assertNotIn("metered", u["text"])
         for u in (half, tenmin):
             self.assertIn("metered", u["text"])
+
+    def test_speed_average_covers_good_tests_in_the_shown_range(self):
+        from datetime import datetime
+        ms = lambda t: datetime.strptime(t, "%Y-%m-%d %H:%M:%S").timestamp() * 1000
+        tests = [mk_speed(100, t="2026-10-09 10:00:00"), mk_speed(0, ok=False, t="2026-10-09 11:00:00"), mk_speed(300, t="2026-10-09 12:00:00"),
+                 mk_speed(900, t="2026-10-10 12:00:00")]
+        day = (ms("2026-10-09 00:00:00"), ms("2026-10-10 00:00:00"))
+        self.assertEqual(self.call("speedAvgIn", tests, *day), {"avg": 200, "n": 2})
+        self.assertIsNone(self.call("speedAvgIn", tests, ms("2026-10-11 00:00:00"), ms("2026-10-12 00:00:00")))
+        self.assertIsNone(self.call("speedAvgIn", [], *day))
+        self.assertEqual(self.call("speedAvgText", {"avg": 200, "n": 2}), "Internet speed avg 200 Mbps \u00b7 2 tests")
+        self.assertEqual(self.call("speedAvgText", {"avg": 94.26, "n": 1}), "Internet speed avg 94.3 Mbps \u00b7 1 test")
+        self.assertEqual(self.call("speedAvgText", None), "")
 
     def test_stats_leave_failed_tests_out_of_the_numbers(self):
         st = self.call("speedStats", [mk_speed(100), mk_speed(0, ok=False), mk_speed(300)])

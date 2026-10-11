@@ -336,7 +336,7 @@ const TIPS = {
   rssi: "How strongly your computer hears the access point, in dBm. Closer to zero is better: -50 is excellent, -67 is about the minimum for reliable calls, -75 or lower is weak. Noise is the background radio level.",
   snr: "Signal minus noise, in dB. 25 or more is good, below 15 is poor even if the signal looks strong. Not available on Windows.",
   channel: "The Wi-Fi channel, band, channel width and standard you are connected on. A change means your computer or router switched channels or bands, which briefly interrupts the connection.",
-  tx: "The speed the Wi-Fi link negotiated, in megabits per second. This is not your internet speed. It drops when the signal is weak or the channel is busy.",
+  tx: "The speed the Wi-Fi link negotiated, in megabits per second. This is not your internet speed. It drops when the signal is weak or the channel is busy. When Internet download tests ran in the selected window, the second line shows their average: what really reached this computer, normally lower than the link rate.",
   crowd: "How many other networks overlap your channel in the latest scan. Strong means a signal of -75 dBm or better. More strong neighbours means more waiting for airtime and lag spikes. The count includes your own router.",
   latency: "Ping times to the router (blue) and the internet (orange) over time. Red crosses at the bottom are lost pings. Dots at the top mark your notes (blue), channel or band changes (purple) and outages (red shading), with grey ticks for scans. Hover a dot for details. Drag across the chart to select a range and analyse it. The table below lists each slow episode with its likely cause. Spikes on both lines point to Wi-Fi trouble. Spikes on the orange line only point beyond your router. Gaps mean nothing was logged. Green shading marks an Internet download speed test: the pings taken during a test are slower because the test fills the connection, so they are drawn but left out of the stats and episodes.",
   signal: "Signal strength (RSSI) and the background noise level, in dBm. The wider the gap between the lines, the cleaner the link. Dips in signal usually mean distance or obstacles. Rising noise means interference. Drag across the chart to select a time range, shared with the latency chart.",
@@ -351,7 +351,7 @@ const TIPS = {
   evcount: "How many things happened in the current view: outages (router and internet both unreachable, or Wi-Fi disconnected), channel or band changes, and notes you added. The Events card lists them with times. Measurement errors (the tool could not read a ping or the Wi-Fi status, for example on a non-English Windows) are counted too and are not packet loss.",
   avail: "Share of observed time that both your router and the internet answered. A moment counts as unavailable when either ping is lost or Wi-Fi is disconnected. Time with no data (computer asleep, collector off) is not counted either way. 99.5% or more is healthy. The second line shows the router and internet shares on their own, and the longest continuous stretch when either was unavailable. A lower internet share with a healthy router share points beyond your Wi-Fi.",
   jitter: "How much the internet ping changes from one sample to the next. Calls need steady delivery: under 10 ms is good, and above 30 ms causes choppy audio and video even when the average ping looks fine. The second line shows the 95th percentile.",
-  callready: "Share of samples good enough for a video call: router ping under 50 ms, internet ping under 150 ms, nothing lost, and signal-to-noise of at least 20 dB (when the system reports it). Worst stretch is the longest unbroken run of samples that were not ready.",
+  callready: "Share of samples good enough for a video call: router ping under 50 ms, internet ping under 150 ms, nothing lost, and signal-to-noise of at least 20 dB (when the system reports it). Worst stretch is the longest unbroken run of samples that were not ready. Time when the computer was asleep or the collector was off is left out, and never joins two bad stretches into one.",
   d_day: "The calendar day of the log file.",
   d_samples: "How many measurements were recorded that day. Far fewer than expected means the collector was off or the computer slept.",
   d_gwloss: "Share of router pings that got no reply.",
@@ -649,8 +649,11 @@ function qualityStats(rows, xmin, xmax) {
   // call-ready: share of samples meeting thresholds, and the longest run that did not
   const ready = d => d.gw != null && d.gw < 50 && d.net != null && d.net < 150 && !d.gwLost && !d.netLost && d.assoc !== false && (d.snr == null || d.snr >= 20);
   const measured = rows.filter(d => !d.gwErr && !d.netErr && !d.speed);  // samples where both pings were actually taken
-  let ok = 0, runStart = null, runEnd = null, worst = 0;
+  // A gap of more than GAP_MS (computer asleep, collector off) is neither good nor bad: it ends a bad stretch instead of extending it.
+  let ok = 0, runStart = null, runEnd = null, worst = 0, prevX = null;
   for (const d of measured) {
+    if (prevX != null && d.x - prevX > GAP_MS) runStart = null;
+    prevX = d.x;
     if (ready(d)) { ok++; runStart = null; }
     else { if (runStart == null) runStart = d.x; runEnd = d.x; worst = Math.max(worst, runEnd - runStart + step); }
   }
@@ -872,7 +875,7 @@ function render() {
     tile('Signal (RSSI)', rs != null ? rs + ' dBm' : 'n/a', last && last.noise != null ? `noise ${last.noise} dBm` : (rs != null ? 'noise not reported' : ''), rs == null ? '' : rs <= -75 ? css('--bad') : rs <= -67 ? css('--warn') : css('--good')),
     tile('SNR', last && last.snr != null ? last.snr + ' dB' : 'n/a', last && last.snr != null ? 'aim for 25+' : 'not reported here', last && last.snr != null ? (last.snr < 15 ? css('--bad') : last.snr < 25 ? css('--warn') : css('--good')) : ''),
     tile('Channel', last && last.ch != null ? `${last.ch}` : 'n/a', last && last.ch != null ? [`${last.band} GHz`, last.width != null ? `${last.width} MHz` : null, last.phy ? `802.${last.phy}` : null].filter(Boolean).join(' · ') : ''),
-    tile('Tx rate', last && last.tx != null ? last.tx + ' Mbps' : 'n/a', ''),
+    tile('Tx rate', last && last.tx != null ? last.tx + ' Mbps' : 'n/a', speedAvgText(speedAvgIn((speedData && speedData.tests) || [], xmin, xmax))),
     tile('Events', rows.length ? evTotal : 'n/a', rows.length ? `${plural(q.outages, 'outage')} · ${plural(q.changes, 'channel change')} · ${plural(q.notes, 'note')}` + (q.errors ? ` · ${plural(q.errors, 'measurement error')}` : '') : '', q.outages ? css('--bad') : q.changes >= 3 || q.errors ? css('--warn') : css('--good')),
     tile('Availability', q.avail == null ? 'n/a' : fmtAvail(q.avail) + '%', q.avail == null ? '' : `router ${fmtAvail(q.availGw)}% · internet ${fmtAvail(q.availNet)}%` + (q.longestDown ? ` · longest drop ${fmtDur(q.longestDown / 1000)}` : ''), q.avail == null ? '' : q.avail >= 99.5 ? css('--good') : q.avail >= 98 ? css('--warn') : css('--bad')),
     tile('Jitter', q.jitter == null ? 'n/a' : f1(q.jitter) + ' ms', q.jitter == null ? '' : `p95 ${f1(q.jitterP95)} ms`, q.jitter == null ? '' : q.jitter < 10 ? css('--good') : q.jitter <= 30 ? css('--warn') : css('--bad')),
@@ -1138,6 +1141,11 @@ function speedUsage(mb, every) {  // how much data the chosen size and schedule 
     : `Downloads ${mb} MB only when you press Run now. Nothing runs by itself.`;
   return { perDayMB, perMonthGB, text, warn };
 }
+function speedAvgIn(tests, xmin, xmax) {  // average of the good tests that ran inside the shown range; null when there is none
+  const v = (tests || []).filter(t => speedOk(t) && pT(String(t.t || '')) >= xmin && pT(String(t.t || '')) <= xmax).map(t => t.mbps);
+  return v.length ? { avg: v.reduce((a, b) => a + b, 0) / v.length, n: v.length } : null;
+}
+const speedAvgText = a => a ? `Internet speed avg ${fmtMbps(a.avg)} · ${a.n} ${a.n === 1 ? 'test' : 'tests'}` : '';
 function speedStats(tests) {  // failed tests count in n but never in the speeds
   const ts = tests || [], ok = ts.filter(speedOk), v = ok.map(t => t.mbps);
   const avg = v.length ? v.reduce((a, b) => a + b, 0) / v.length : null;
@@ -1171,7 +1179,7 @@ function speedAdvice(tests, link) {
   return { keys, messages };
 }
 
-let speedUrlEdited = false, speedData = null, speedBusy = false, speedPrevRunning = false, speedWatchUntil = 0, speedDirty = false, speedPosting = false, speedTimer = null, gaugeMax = 0, speedMsgTimer = null;
+let speedSig = '', speedUrlEdited = false, speedData = null, speedBusy = false, speedPrevRunning = false, speedWatchUntil = 0, speedDirty = false, speedPosting = false, speedTimer = null, gaugeMax = 0, speedMsgTimer = null;
 const speedWhen = (t, withDate, secs) => { const s = String(t || ''); return withDate ? `${s.slice(5, 10)} ${s.slice(11, 16)}` : s.slice(11, secs ? 19 : 16); };
 
 async function loadSpeed() {
@@ -1183,6 +1191,8 @@ async function loadSpeed() {
     speedData = j && typeof j === 'object' && !Array.isArray(j) ? j : null;  // a 404 or empty answer: the card says "no data yet"
   } catch (e) { /* server busy or unreachable: keep what is shown */ }
   speedBusy = false;
+  const sig = speedData && speedData.tests ? speedData.tests.length + ':' + speedData.tests.filter(speedOk).length : '';
+  if (sig !== speedSig) { speedSig = sig; if (all.length) render(); }  // the Tx rate tile shows the speed average
   const running = !!(speedData && speedData.state && speedData.state.running);
   renderSpeed();
   if (charts.lat) charts.lat.draw();
