@@ -363,6 +363,10 @@ class SpeedHelperTests(unittest.TestCase):
         self.assertEqual(self.call("speedAvgIn", tests, *day), {"avg": 200, "n": 2})
         self.assertIsNone(self.call("speedAvgIn", tests, ms("2026-10-11 00:00:00"), ms("2026-10-12 00:00:00")))
         self.assertIsNone(self.call("speedAvgIn", [], *day))
+        self.assertEqual(self.call("speedAvgIn", tests, ms("2026-10-11 00:00:00"), ms("2026-10-12 00:00:00"), True), None)
+        fb = self.call("speedAvgIn", tests, -1e18, 1e18, True)  # fallback over every test the server returned
+        self.assertEqual((fb["avg"], fb["n"], fb["earlier"]), (433.3333333333333, 3, True))
+        self.assertEqual(self.call("speedAvgText", fb), "Internet speed avg 433 Mbps \u00b7 3 earlier tests")
         self.assertEqual(self.call("speedAvgText", {"avg": 200, "n": 2}), "Internet speed avg 200 Mbps \u00b7 2 tests")
         self.assertEqual(self.call("speedAvgText", {"avg": 94.26, "n": 1}), "Internet speed avg 94.3 Mbps \u00b7 1 test")
         self.assertEqual(self.call("speedAvgText", None), "")

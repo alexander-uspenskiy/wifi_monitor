@@ -38,6 +38,9 @@ def parse(line):
     net = kv.get("internet_ms", kv.get("internet"))
     if gw is None and net is None:
         return None
+    noise, snr = num(kv.get("noise")), num(kv.get("snr"))
+    if noise is not None and noise >= 0:
+        noise = snr = None  # logs written before the collector filtered it: 0 dBm means "not measured" and gives a meaningless SNR
     return {
         "t": ts,
         "gw": num(gw),
@@ -49,8 +52,8 @@ def parse(line):
         "wifiErr": kv.get("wifi") == "ERR",
         "assoc": "not associated" not in rest,
         "rssi": num(kv.get("rssi")),
-        "noise": num(kv.get("noise")),
-        "snr": num(kv.get("snr")),
+        "noise": noise,
+        "snr": snr,
         "ch": num(kv.get("ch")),
         "band": kv.get("band", "").replace("GHz", "") or None,
         "width": num(kv.get("width")),

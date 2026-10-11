@@ -183,7 +183,8 @@ def mac_wifi():
         return {"assoc": False}
     try:
         rssi, noise, ch, band, width, tx, phy = out.split()
-        return {"assoc": True, "rssi": int(rssi), "noise": int(noise), "ch": int(ch), "band": band,
+        # macOS reports a noise of 0 dBm when it has no measurement (real noise is always negative): not reported, so no SNR either
+        return {"assoc": True, "rssi": int(rssi), "noise": int(noise) if int(noise) < 0 else None, "ch": int(ch), "band": band,
                 "width": width, "tx": tx, "phy": MAC_PHY[int(phy)] if int(phy) < len(MAC_PHY) else "?"}
     except ValueError:
         return {"error": "Wi-Fi helper exit %s, unexpected output: %s" % (r.rc, snippet(out + " " + r.err))}

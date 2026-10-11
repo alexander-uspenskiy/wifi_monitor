@@ -31,6 +31,10 @@ class ParseTests(unittest.TestCase):
                          (3.057, 21.925, -70, -89, 19, 149, "5", 80, 351, "11ac"))
         self.assertEqual((r["gwLost"], r["netLost"], r["assoc"], r["gwErr"], r["netErr"], r["wifiErr"]), (False, False, True, False, False, False))
 
+    def test_noise_of_zero_in_an_old_line_is_not_measured(self):
+        r = s.parse("2026-10-11 15:47:42 gateway_ms=3.5 internet_ms=30.9 rssi=-68 noise=0 snr=-68 ch=149 band=5GHz width=80MHz tx=180Mbps phy=11ac")
+        self.assertEqual((r["rssi"], r["noise"], r["snr"], r["tx"]), (-68, None, None, 180))
+
     def test_windows_line(self):
         r = s.parse(WIN_LINE)
         self.assertEqual((r["gw"], r["rssi"], r["noise"], r["ch"], r["band"], r["width"]), (2.0, -50, None, 13, "2.4", None))

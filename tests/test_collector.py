@@ -215,6 +215,11 @@ class MacWifiTests(unittest.TestCase):
         self.assertEqual((w["assoc"], w["rssi"], w["noise"], w["ch"], w["band"], w["width"], w["tx"], w["phy"]),
                          (True, -70, -89, 149, "5", "80", "351", "ac"))
 
+    def test_noise_of_zero_means_not_measured(self):
+        w = self.wifi("-68 0 149 5 80 180 5\n")
+        self.assertEqual((w["rssi"], w["noise"]), (-68, None))
+        self.assertNotIn("snr=", c.format_wifi(w))
+
     def test_not_associated(self):
         self.assertEqual(self.wifi("NA\n"), {"assoc": False})
 
