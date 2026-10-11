@@ -153,6 +153,7 @@
   .tile { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 10px 12px; }
   .tile .k { color: var(--muted); font-size: 12px; }
   .tile .v { font-size: 22px; font-weight: 650; margin-top: 2px; font-variant-numeric: tabular-nums; }
+  .tile .k2 { color: var(--muted); font-size: 12px; margin-top: 6px; }
   .tile .s { color: var(--muted); font-size: 12px; margin-top: 1px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; min-width: 0; }
@@ -791,8 +792,8 @@ function series(rows, fn, gap = GAP_MS) {
   return out;
 }
 
-function tile(k, v, s = '', color = '') {
-  return `<div class="tile"><div class="k">${k}${TILE_TIPS[k] ? info(TILE_TIPS[k]) : ''}</div><div class="v" style="${color ? 'color:' + color : ''}">${v}</div><div class="s">${s}</div>${TILE_TIPS[k] ? fixBlock(TILE_TIPS[k]) : ''}</div>`;
+function tile(k, v, s = '', color = '', extra = '') {  // extra: a second labelled value under the first
+  return `<div class="tile"><div class="k">${k}${TILE_TIPS[k] ? info(TILE_TIPS[k]) : ''}</div><div class="v" style="${color ? 'color:' + color : ''}">${v}</div>${extra}<div class="s">${s}</div>${TILE_TIPS[k] ? fixBlock(TILE_TIPS[k]) : ''}</div>`;
 }
 const pct = (arr, p) => { if (!arr.length) return null; const a = [...arr].sort((x, y) => x - y); return a[Math.min(a.length - 1, Math.floor(a.length * p))]; };
 const f1 = v => v == null ? '–' : (Math.round(v * 10) / 10).toString();
@@ -875,7 +876,7 @@ function render() {
     tile('Signal (RSSI)', rs != null ? rs + ' dBm' : 'n/a', last && last.noise != null ? `noise ${last.noise} dBm` : (rs != null ? 'noise not reported' : ''), rs == null ? '' : rs <= -75 ? css('--bad') : rs <= -67 ? css('--warn') : css('--good')),
     tile('SNR', last && last.snr != null ? last.snr + ' dB' : 'n/a', last && last.snr != null ? 'aim for 25+' : 'not reported here', last && last.snr != null ? (last.snr < 15 ? css('--bad') : last.snr < 25 ? css('--warn') : css('--good')) : ''),
     tile('Channel', last && last.ch != null ? `${last.ch}` : 'n/a', last && last.ch != null ? [`${last.band} GHz`, last.width != null ? `${last.width} MHz` : null, last.phy ? `802.${last.phy}` : null].filter(Boolean).join(' · ') : ''),
-    tile('Tx rate', last && last.tx != null ? last.tx + ' Mbps' : 'n/a', speedAvgText(speedAvgIn(speedTests(), xmin, xmax) || speedAvgIn(speedTests(), -Infinity, Infinity, true))),
+    tile('Tx rate', last && last.tx != null ? last.tx + ' Mbps' : 'n/a', '', '', speedAvgTile(speedAvgIn(speedTests(), xmin, xmax) || speedAvgIn(speedTests(), -Infinity, Infinity, true))),
     tile('Events', rows.length ? evTotal : 'n/a', rows.length ? `${plural(q.outages, 'outage')} · ${plural(q.changes, 'channel change')} · ${plural(q.notes, 'note')}` + (q.errors ? ` · ${plural(q.errors, 'measurement error')}` : '') : '', q.outages ? css('--bad') : q.changes >= 3 || q.errors ? css('--warn') : css('--good')),
     tile('Availability', q.avail == null ? 'n/a' : fmtAvail(q.avail) + '%', q.avail == null ? '' : `router ${fmtAvail(q.availGw)}% · internet ${fmtAvail(q.availNet)}%` + (q.longestDown ? ` · longest drop ${fmtDur(q.longestDown / 1000)}` : ''), q.avail == null ? '' : q.avail >= 99.5 ? css('--good') : q.avail >= 98 ? css('--warn') : css('--bad')),
     tile('Jitter', q.jitter == null ? 'n/a' : f1(q.jitter) + ' ms', q.jitter == null ? '' : `p95 ${f1(q.jitterP95)} ms`, q.jitter == null ? '' : q.jitter < 10 ? css('--good') : q.jitter <= 30 ? css('--warn') : css('--bad')),
@@ -1145,7 +1146,8 @@ function speedAvgIn(tests, xmin, xmax, earlier) {  // average of the good tests 
   const v = (tests || []).filter(t => speedOk(t) && pT(String(t.t || '')) >= xmin && pT(String(t.t || '')) <= xmax).map(t => t.mbps);
   return v.length ? { avg: v.reduce((a, b) => a + b, 0) / v.length, n: v.length, ...(earlier ? { earlier: true } : {}) } : null;
 }
-const speedAvgText = a => a ? `Internet speed avg ${fmtMbps(a.avg)} · ${a.n} ${a.earlier ? 'earlier ' : ''}${a.n === 1 ? 'test' : 'tests'}` : '';
+const speedAvgLabel = a => `Internet speed avg · ${a.n} ${a.earlier ? 'earlier ' : ''}${a.n === 1 ? 'test' : 'tests'}`;
+const speedAvgTile = a => a ? `<div class="k2">${speedAvgLabel(a)}</div><div class="v">${fmtMbps(a.avg)}</div>` : '';
 const speedTests = () => (speedData && Array.isArray(speedData.tests) ? speedData.tests : []);  // none in this window: the latest tests the server returned, marked as earlier
 function speedStats(tests) {  // failed tests count in n but never in the speeds
   const ts = tests || [], ok = ts.filter(speedOk), v = ok.map(t => t.mbps);

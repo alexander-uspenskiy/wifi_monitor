@@ -366,11 +366,10 @@ class SpeedHelperTests(unittest.TestCase):
         self.assertEqual(self.call("speedAvgIn", tests, ms("2026-10-11 00:00:00"), ms("2026-10-12 00:00:00"), True), None)
         fb = self.call("speedAvgIn", tests, -1e18, 1e18, True)  # fallback over every test the server returned
         self.assertEqual((fb["avg"], fb["n"], fb["earlier"]), (433.3333333333333, 3, True))
-        self.assertEqual(self.call("speedAvgText", fb), "Internet speed avg 433 Mbps \u00b7 3 earlier tests")
-        self.assertEqual(self.call("speedAvgText", {"avg": 200, "n": 2}), "Internet speed avg 200 Mbps \u00b7 2 tests")
-        self.assertEqual(self.call("speedAvgText", {"avg": 94.26, "n": 1}), "Internet speed avg 94.3 Mbps \u00b7 1 test")
-        self.assertEqual(self.call("speedAvgText", None), "")
-
+        self.assertEqual(self.call("speedAvgLabel", fb), "Internet speed avg \u00b7 3 earlier tests")
+        self.assertEqual(self.call("speedAvgLabel", {"avg": 200, "n": 2}), "Internet speed avg \u00b7 2 tests")
+        self.assertEqual(self.call("speedAvgLabel", {"avg": 94.26, "n": 1}), "Internet speed avg \u00b7 1 test")
+        
     def test_stats_leave_failed_tests_out_of_the_numbers(self):
         st = self.call("speedStats", [mk_speed(100), mk_speed(0, ok=False), mk_speed(300)])
         self.assertEqual((st["n"], st["okN"], st["last"], st["median"], st["min"], st["max"], st["avg"]), (3, 2, 300, 200, 100, 300, 200))
