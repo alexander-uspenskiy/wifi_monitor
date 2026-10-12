@@ -263,7 +263,6 @@
         <label>Size (MB)<input type="number" id="spMb" min="10" max="100" step="1" value="25"></label>
         <label>Run<select id="spEvery"><option value="0">One time</option><option value="600">Every 10 min</option><option value="1800">Every 30 min</option><option value="3600">Every 1 hour</option></select></label>
         <button type="button" id="spRun" disabled>Run now</button>
-        <button type="submit" class="go" id="spSave">Save</button>
       </form>
       <div class="probeline spusage" id="spUsage"></div>
       <div class="spmsg" id="spMsg" role="status"></div>
@@ -1182,7 +1181,7 @@ function speedAdvice(tests, link) {
   return { keys, messages };
 }
 
-let speedSig = '', speedUrlEdited = false, speedData = null, speedBusy = false, speedPrevRunning = false, speedWatchUntil = 0, speedDirty = false, speedPosting = false, speedTimer = null, gaugeMax = 0, speedMsgTimer = null;
+let speedSig = '', speedUrlEdited = false, speedData = null, speedBusy = false, speedPrevRunning = false, speedWatchUntil = 0, speedDirty = false, speedPosting = false, speedAwaitUntil = 0, speedTimer = null, gaugeMax = 0, speedMsgTimer = null;
 const speedWhen = (t, withDate, secs) => { const s = String(t || ''); return withDate ? `${s.slice(5, 10)} ${s.slice(11, 16)}` : s.slice(11, secs ? 19 : 16); };
 
 async function loadSpeed() {
@@ -1244,14 +1243,15 @@ function renderSpeed() {
   }
   renderSpeedUsage();
   const run = $('#spRun'), noColl = !coll || !coll.running;
-  run.disabled = !d || noColl || running || speedPosting;
-  run.title = !d ? 'Speed data is not available from the dashboard server yet' : noColl ? 'The collector is not running, so nothing will happen. Start it first' : running ? 'A test is already running' : 'Run one download test now. It uses the size set here.';
-  // gauge: the live rate while a test runs, otherwise the last good result
+  if (running) speedAwaitUntil = 0;  // the collector picked the request up
+  const awaiting = Date.now() < speedAwaitUntil;  // requested, but the collector has not started yet (it can take a few seconds)
+  run.disabled = !d || noColl || running || speedPosting || awaiting;
+  run.title = awaiting ? 'A test was requested and is about to start' : !d ? 'Speed data is not available from the dashboard server yet' : noColl ? 'The collector is not running, so nothing will happen. Start it first' : running ? 'A test is already running' : 'Run one download test now. It uses the size set here.';
+  // gauge: the live rate while a test runs, back to zero when it ends (the last result is in the caption)
   gaugeMax = running ? Math.max(gaugeMax, st.mbps || 0) : 0;
-  const shown = running ? (st.mbps != null ? st.mbps : 0) : stats.last;
-  renderGauge(shown, running, stats.median);
+  renderGauge(running ? (st.mbps != null ? st.mbps : 0) : null, running, stats.median);
   const lastOk = [...tests].reverse().find(speedOk);
-  $('#spCap').textContent = running ? `Testing now (${st.trigger === 'scheduled' ? 'scheduled' : 'manual'})` : lastOk ? `Last test ${speedWhen(lastOk.t, String(lastOk.t).slice(0, 10) !== todayStr(), true)}${stats.okN > 1 ? ` · median ${fmtMbps(stats.median)} · best ${fmtMbps(stats.max)}` : ''}` : d ? 'No successful test yet' : 'No data yet';
+  $('#spCap').textContent = running ? `Testing now (${st.trigger === 'scheduled' ? 'scheduled' : 'manual'})` : lastOk ? `Last test ${fmtMbps(lastOk.mbps)} ${speedWhen(lastOk.t, String(lastOk.t).slice(0, 10) !== todayStr(), true)}${stats.okN > 1 ? ` · median ${fmtMbps(stats.median)} · best ${fmtMbps(stats.max)}` : ''}` : d ? 'No successful test yet' : 'No data yet';
   const bar = $('#spBar'), pctDone = running && st.target_bytes > 0 ? Math.min(100, 100 * (st.bytes || 0) / st.target_bytes) : 0;
   bar.hidden = !running; bar.firstElementChild.style.width = pctDone + '%';
   const host = st.host || 'the server';
@@ -1276,7 +1276,7 @@ function renderSpeed() {
   }
   const cell = (v, suffix = '') => v == null ? '–' : v + suffix;
   $('#spBody').innerHTML = !d ? '<tr><td colspan="9" style="color:var(--muted)">No data yet.</td></tr>'
-    : !tests.length ? '<tr><td colspan="9" style="color:var(--muted)">No tests yet. Press Run now, or choose a schedule and Save.</td></tr>'
+    : !tests.length ? '<tr><td colspan="9" style="color:var(--muted)">No tests yet. Press Run now, or choose a schedule.</td></tr>'
     : tests.slice(-15).reverse().map(t => {
       const ok = speedOk(t), w = t.wifi || {}, c = speedBarColor(ok ? t.mbps : null, stats.median);
       const title = escHtml(`started ${t.start || '?'} · ${t.trigger || ''}${t.host ? ' · ' + t.host : ''}`);
@@ -1305,19 +1305,27 @@ async function speedPost(body, okText) {
   speedPosting = false;
   return ok;
 }
-for (const ev of ['input', 'change']) $('#spForm').addEventListener(ev, e => { speedDirty = true; if (e.target.id === 'spUrl') speedUrlEdited = true; renderSpeedUsage(); });
-$('#spForm').addEventListener('submit', async e => {
-  e.preventDefault();
-  // the server shows only the host of the address to a page opened from another computer: never send that back, only an address the user typed
-  const body = { speed_mb: +$('#spMb').value, speed_every: +$('#spEvery').value };
-  if (speedUrlEdited) body.speed_url = $('#spUrl').value.trim() || null;
-  if (await speedPost(body, 'Saved. The collector applies it within a few seconds.')) { speedDirty = false; speedUrlEdited = false; await loadSpeed(); load(); }
-  else renderSpeed();
-});
+// no Save button: a change is saved when the field is left (or the menu is changed), like the probe menus. Saves run one after another.
+let speedSaving = Promise.resolve();
+function saveSpeed() {
+  return speedSaving = speedSaving.then(async () => {
+    const mb = +$('#spMb').value;
+    if (!Number.isInteger(mb) || mb < 10 || mb > 100) { renderSpeed(); return false; }  // the line under the form says what is wrong; nothing is sent until it is fixed
+    // the server shows only the host of the address to a page opened from another computer: never send that back, only an address the user typed
+    const body = { speed_mb: mb, speed_every: +$('#spEvery').value };
+    if (speedUrlEdited) body.speed_url = $('#spUrl').value.trim() || null;
+    if (await speedPost(body, 'Saved. The collector applies it within a few seconds.')) { speedDirty = false; speedUrlEdited = false; await loadSpeed(); load(); return true; }
+    renderSpeed(); return false;
+  });
+}
+$('#spForm').addEventListener('input', e => { speedDirty = true; if (e.target.id === 'spUrl') speedUrlEdited = true; renderSpeedUsage(); });
+$('#spForm').addEventListener('change', e => { speedDirty = true; if (e.target.id === 'spUrl') speedUrlEdited = true; renderSpeedUsage(); saveSpeed(); });
+$('#spForm').addEventListener('submit', e => { e.preventDefault(); saveSpeed(); });
 $('#spRun').addEventListener('click', async () => {
+  await speedSaving;  // a field just left is still being saved: the test must use it
   const dirty = speedDirty;
   if (await speedPost({ speed_run: true }, 'Requested. The collector starts the test within a few seconds' + (dirty ? ', with the saved settings (your edits are not saved yet).' : '.'))) {
-    speedWatchUntil = Date.now() + 30000; await loadSpeed(); load();
+    speedWatchUntil = speedAwaitUntil = Date.now() + 30000; await loadSpeed(); load();
   } else renderSpeed();
 });
 

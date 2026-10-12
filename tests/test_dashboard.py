@@ -589,7 +589,7 @@ class SpeedCardMarkupTests(unittest.TestCase):
         return found[0]
 
     def test_ids_exist_exactly_once_inside_the_card(self):
-        for ident in ("spUrl", "spMb", "spEvery", "spRun", "spSave", "spUsage", "spGauge", "cSpeed", "spBody", "spAdvice"):
+        for ident in ("spUrl", "spMb", "spEvery", "spRun", "spUsage", "spGauge", "cSpeed", "spBody", "spAdvice"):
             with self.subTest(ident):
                 self.assertIn(("div", "speedCard"), self.one(ident)["up"])
         self.assertEqual(self.one("speedCard")["attrs"].get("class", "").split(), ["card", "full"])
@@ -619,7 +619,7 @@ class SpeedCardMarkupTests(unittest.TestCase):
         self.assertNotIn("start-up", sel)
         self.assertNotIn("data-ctl", self.one("spEvery")["attrs"])  # not the probes table's menu mechanism
         self.assertEqual(self.one("spRun")["text"], "Run now")
-        self.assertEqual(self.one("spSave")["text"], "Save")
+        self.assertEqual(self.dom.by_id("spSave"), [])  # saved on change, no button
         self.assertEqual(self.one("spGauge")["tag"], "svg")
         self.assertEqual(self.one("cSpeed")["tag"], "canvas")
 
