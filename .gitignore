@@ -16,3 +16,6 @@ __pycache__/
 .venv/
 venv/
 .claude/
+
+# promo video project (HyperFrames)
+videos/
