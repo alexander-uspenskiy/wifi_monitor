@@ -391,6 +391,15 @@ class SpeedAdviceTests(unittest.TestCase):
     def test_no_data_gives_no_advice(self):
         self.assertEqual(self.advice([]), {"keys": [], "messages": []})
 
+    def test_a_big_change_from_the_previous_test_suggests_another_server(self):
+        self.assertIn("server_differs", self.keys([mk_speed(400), mk_speed(200)]))
+        self.assertIn("server_differs", self.keys([mk_speed(200), mk_speed(400)]))
+        self.assertNotIn("server_differs", self.keys([mk_speed(400), mk_speed(300)]))
+        self.assertNotIn("server_differs", self.keys([mk_speed(400)]))
+        self.assertNotIn("server_differs", self.keys([mk_speed(400), mk_speed(0, ok=False), mk_speed(380)]))
+        self.assertIn("server_differs", self.keys([mk_speed(400), mk_speed(0, ok=False), mk_speed(100)]))  # failed tests are skipped
+        self.assertNotIn("server_differs", self.keys([mk_speed(400), mk_speed(100, host="example.org")]))  # another server explains it
+
     def test_healthy_result_says_ok_and_always_adds_the_caveat(self):
         a = self.advice([mk_speed(400)])
         self.assertEqual(a["keys"], ["ok"])
