@@ -2,6 +2,8 @@
 
 Find out why your Wi-Fi drops during Zoom and Teams calls. WiFiMonitor records router and internet latency, signal quality, channel and band, and how crowded your channel is, then shows it all on a live dashboard so you can line up bad moments with their cause.
 
+https://github.com/user-attachments/assets/43bfdc72-2a7d-42c0-8f4d-a162c397f30c
+
 Runs on **macOS** and **Windows**. Everything stays on your machine. It is a standalone tool: no AI service, account or API key is involved, and the collector and dashboard server use only the Python standard library. Beyond the pings to your router and the internet target (about 100 bytes each), the dashboard page loads the Chart.js charting library from a CDN, and the optional **Internet download speed** test downloads 10 to 100 MB from a speed server, but only when you press Run now or choose a schedule for it. Nothing else leaves your computer.
 
 ## What it measures
